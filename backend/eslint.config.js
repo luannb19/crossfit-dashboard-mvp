@@ -3,24 +3,33 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 export default [
-  // arquivos/pastas ignorados
-  { ignores: ["dist/**", "node_modules/**"] },
+  // Ignora build, deps e seeds JS do Prisma
+  { ignores: ["dist/**", "node_modules/**", "prisma/**/*.js"] },
 
-  // Regras JS recomendadas
-  js.configs.recommended,
-
-  // Regras TS recomendadas
-  ...tseslint.configs.recommended,
-
-  // Ajustes do projeto
+  // Opções base (Node + ES modules)
   {
     languageOptions: {
       ecmaVersion: "latest",
       sourceType: "module",
       globals: { ...globals.node }
-    },
+    }
+  },
+
+  // Regras JS recomendadas
+  js.configs.recommended,
+
+  // Regras TS recomendadas, aplicadas SOMENTE a .ts/.tsx
+  ...tseslint.configs.recommended.map((cfg) => ({
+    ...cfg,
+    files: ["**/*.ts", "**/*.tsx"],
+  })),
+
+  // Ajustes de regras para TS
+  {
+    files: ["**/*.ts", "**/*.tsx"],
     rules: {
-      "@typescript-eslint/no-explicit-any": "off"
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_" }]
     }
   }
 ];
