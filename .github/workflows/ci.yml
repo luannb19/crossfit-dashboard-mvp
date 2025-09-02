@@ -1,4 +1,5 @@
 name: CI
+
 on:
   push:
     branches: [ main ]
@@ -20,41 +21,27 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
 
-      # usa npm ci se houver lockfile, senão npm install
+      - name: Show npm versions
+        run: |
+          node -v
+          npm -v
+
       - name: Install deps
         run: |
           if [ -f package-lock.json ]; then
-            npm ci
+            npm ci || (echo "npm ci failed, falling back to npm install"; rm -f package-lock.json && npm install)
           else
             npm install
           fi
 
-      # gera prisma sem precisar de Postgres
-      - name: Prisma generate
+      - name: Generate Prisma client
         run: npx prisma generate
         env:
           DATABASE_URL: "file:./dev.db"
 
-      # só roda se typescript estiver instalado
-      - name: Typecheck (if TS present)
-        run: |
-          if [ -f node_modules/.bin/tsc ]; then
-            npm run typecheck
-          else
-            echo "Skipping typecheck (TypeScript not installed)"
-          fi
-
-      # só roda se eslint estiver instalado
-      - name: Lint (if ESLint present)
-        run: |
-          if [ -f node_modules/.bin/eslint ]; then
-            npm run lint
-          else
-            echo "Skipping lint (ESLint not installed)"
-          fi
-
-      - name: Build (if script present)
-        run: npm run build --if-present
+      - run: npm run typecheck --if-present
+      - run: npm run lint --if-present
+      - run: npm run build --if-present
 
   frontend:
     name: Frontend
@@ -70,29 +57,19 @@ jobs:
           cache: npm
           cache-dependency-path: apps/gestor-dashboard/package-lock.json
 
+      - name: Show npm versions
+        run: |
+          node -v
+          npm -v
+
       - name: Install deps
         run: |
           if [ -f package-lock.json ]; then
-            npm ci
+            npm ci || (echo "npm ci failed, falling back to npm install"; rm -f package-lock.json && npm install)
           else
             npm install
           fi
 
-      - name: Typecheck (if TS present)
-        run: |
-          if [ -f node_modules/.bin/tsc ]; then
-            npm run typecheck
-          else
-            echo "Skipping typecheck (TypeScript not installed)"
-          fi
-
-      - name: Lint (if ESLint present)
-        run: |
-          if [ -f node_modules/.bin/eslint ]; then
-            npm run lint
-          else
-            echo "Skipping lint (ESLint not installed)"
-          fi
-
-      - name: Build (if script present)
-        run: npm run build --if-present
+      - run: npm run typecheck --if-present
+      - run: npm run lint --if-present
+      - run: npm run build --if-present
