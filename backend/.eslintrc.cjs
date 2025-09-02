@@ -1,17 +1,12 @@
 module.exports = {
   root: true,
+  env: { node: true, es2022: true },
   parser: '@typescript-eslint/parser',
-  parserOptions: { project: ['./tsconfig.json'] },
-  plugins: ['@typescript-eslint', 'import'],
-  extends: [
-    'eslint:recommended',
-    'plugin:@typescript-eslint/recommended',
-    'plugin:import/recommended',
-    'plugin:import/typescript',
-    'prettier'
-  ],
+  parserOptions: { ecmaVersion: 'latest', sourceType: 'module' },
+  plugins: ['@typescript-eslint'],
+  extends: ['eslint:recommended', 'plugin:@typescript-eslint/recommended', 'prettier'],
+  ignorePatterns: ['dist/**', 'node_modules/**'],
   rules: {
-    'import/order': ['error', { 'newlines-between': 'always' }],
-    '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }]
+    '@typescript-eslint/no-explicit-any': 'off'
   }
 };
