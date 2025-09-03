@@ -11,5 +11,5 @@
     "allowJs": true,
     "types": ["node", "vitest/globals"]
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*", "src/types/**/*.d.ts"]
 }
