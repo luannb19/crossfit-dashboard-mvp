@@ -125,4 +125,30 @@ App do Aluno (login, agenda, presenças)
 Site público (landing + leads)
 /auth/refresh + cookies httpOnly (backend)
 
+## Backend (Node/Express/TypeScript)
+
+### Rodando local
+```bash
+cd backend
+cp .env.example .env   # ajuste JWT_SECRET e DATABASE_URL se quiser
+npm install
+npm run dev
+# http://localhost:4000
+
+Scripts úteis
+npm run typecheck — Checagem TS
+npm run lint — ESLint (flat config)
+npm test — Vitest
+npm run build — build TypeScript
+Endpoints de saúde
+GET /health → { ok: true }
+GET /health/db → { ok: true, db: { available: true|false } }
+GET /health/secure
+401 sem token
+200 com Authorization: Bearer <jwt> (assinado com JWT_SECRET)
+CI
+GitHub Actions sobe Postgres no job do backend
+prisma generate + migrate deploy (quando schema provider = postgresql)
+Vitest roda no backend
+
 
