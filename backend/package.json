@@ -16,7 +16,8 @@
     "db:gen": "prisma generate",
     "seed": "ts-node prisma/seed.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "predev": "kill-port 4000 5050 || true"
   },
   "lint-staged": {
     "*.{ts,tsx,js,json,md}": [
@@ -53,6 +54,7 @@
     "eslint-config-prettier": "^9.1.0",
     "globals": "^15.4.0",
     "husky": "^9.1.6",
+    "kill-port": "^2.0.1",
     "lint-staged": "^15.2.10",
     "nodemon": "^3.1.10",
     "prettier": "^3.3.3",
