@@ -1,14 +1,17 @@
+// backend/tsconfig.json
 {
   "compilerOptions": {
     "target": "ES2020",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+
     "outDir": "dist",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "allowJs": true,
+
     "types": ["node", "vitest/globals"]
   },
   "include": ["src/**/*", "src/types/**/*.d.ts"]

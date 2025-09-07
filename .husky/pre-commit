@@ -1,5 +1,3 @@
-#!/usr/bin/env sh
-. "$(dirname -- "$0")/_/husky.sh"
-
+# roda lint-staged apenas no backend
 cd backend || exit 1
 npx lint-staged
