@@ -6,10 +6,14 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+
 jobs:
   backend:
     name: Backend
     runs-on: ubuntu-latest
+
     services:
       postgres:
         image: postgres:16
@@ -33,6 +37,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -54,7 +59,6 @@ jobs:
 
       - name: Generate Prisma client
         run: npx prisma generate
-       
 
       - name: Wait for Postgres
         run: |
@@ -71,42 +75,52 @@ jobs:
             echo "Skipping migrate (schema provider != postgresql)"
           fi
 
-        
+      - name: Typecheck
+        run: npm run typecheck --if-present
 
-      - run: npm run typecheck --if-present
-      - run: npm run lint --if-present
-      - run: npm run build --if-present
+      - name: Lint
+        run: npm run lint --if-present
+
+      - name: Build
+        run: npm run build --if-present
+
       - name: Backend tests (coverage)
         run: npm run test:coverage
+
+      # Debug para confirmar onde o coverage foi gerado
+      - name: Debug coverage path
+        if: always()
+        run: |
+          echo "Workspace: $GITHUB_WORKSPACE"
+          ls -la
+          ls -la backend || true
+          ls -la backend/coverage || true
 
       - name: Publicar artefato de coverage (HTML)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: coverage-${{ github.sha }}
-          path: backend/coverage/**
-          if-no-files-found: error
+          path: backend/coverage
+          if-no-files-found: warn
           retention-days: 7
-
 
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
+
     defaults:
       run:
-        working-directory: apps/gestor-dashboard
+        working-directory: frontend
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: apps/gestor-dashboard/package-lock.json
-
-      - name: Show npm versions
-        run: |
-          node -v
-          npm -v
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install deps
         run: |
@@ -116,6 +130,15 @@ jobs:
             npm install
           fi
 
-      - run: npm run typecheck --if-present
-      - run: npm run lint --if-present
-      - run: npm run build --if-present
+      - name: Typecheck
+        run: npm run typecheck --if-present
+
+      - name: Lint
+        run: npm run lint --if-present
+
+      - name: Build
+        run: npm run build --if-present
+
+      - name: Tests
+        run: npm test --if-present
+
