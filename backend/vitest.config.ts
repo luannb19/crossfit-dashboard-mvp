@@ -8,16 +8,15 @@ export default defineConfig({
       provider: "v8",
       reportsDirectory: "coverage",
       reporter: ["text", "text-summary", "html", "lcov"],
-      // conte APENAS arquivos TS da pasta src
       include: ["src/**/*.ts"],
-      // exclua legados em JS e seeds/prisma
-      exclude: [
-        "src/**/*.js",
-        "prisma/**",
-        "**/*.d.ts",
-        "src/**/__tests__/**"
-      ],
-      all: true, // reporta % também pros TS não testados
+      exclude: ["src/**/*.js", "prisma/**", "**/*.d.ts", "src/**/__tests__/**"],
+      all: true,
+      thresholds: {
+        lines: 75,
+        functions: 75,
+        branches: 70,
+        statements: 75,
+      },
     },
   },
 });
