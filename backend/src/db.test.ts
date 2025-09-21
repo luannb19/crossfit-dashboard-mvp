@@ -1,22 +1,19 @@
-import { describe, it, expect, afterAll } from "vitest";
+// src/db.test.ts
+import { describe, test, expect } from "vitest";
 import { PrismaClient } from "@prisma/client";
 
-const url = process.env.DATABASE_URL ?? "";
-const isPg = url.startsWith("postgresql://");
-
-const prisma = isPg ? new PrismaClient() : null;
-
-afterAll(async () => {
-  if (prisma) await prisma.$disconnect();
-});
+const isCI = !!process.env.CI;
 
 describe("DB smoke (Postgres only)", () => {
-  it("connects and SELECT 1", async () => {
-    if (!isPg) {
-      expect(true).toBe(true); // skip quando não for Postgres
-      return;
+  const itOrSkip = isCI ? test : test.skip;
+
+  itOrSkip("connects and SELECT 1", async () => {
+    const prisma = new PrismaClient();
+    try {
+      const res = await prisma.$queryRawUnsafe("SELECT 1");
+      expect(res).toBeTruthy();
+    } finally {
+      await prisma.$disconnect();
     }
-    const res = await prisma!.$queryRawUnsafe("SELECT 1");
-    expect(res).toBeTruthy();
   });
 });

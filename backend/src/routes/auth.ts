@@ -4,7 +4,6 @@ import jwt from "jsonwebtoken";
 import { z } from "zod";
 import { env } from "../env";
 import { requireAuth } from "../middleware/auth";
-import { prisma } from "../lib/prisma";
 
 export const authRouter = Router();
 

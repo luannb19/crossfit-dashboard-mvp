@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { frequenciaQuerySchema } from "../schemas/frequencia";
+import { getFrequencia } from "../repos/frequenciaRepo";
 
 export const frequenciaRouter = Router();
 
@@ -13,7 +14,7 @@ function enumerateDays(from: Date, to: Date) {
   return out;
 }
 
-frequenciaRouter.get("/", (req, res) => {
+frequenciaRouter.get("/", async (req, res) => {
   const parsed = frequenciaQuerySchema.safeParse(req.query);
   if (!parsed.success) {
     return res.status(400).json({
@@ -23,8 +24,47 @@ frequenciaRouter.get("/", (req, res) => {
   }
 
   const { from, to, groupBy, classId, alunoId, limit } = parsed.data;
-  const data = enumerateDays(from, to).slice(0, limit);
 
+  // Gate por env: se ligado, usa DB e mantém o MESMO shape { filters, data, meta }
+  if (process.env.USE_FREQ_DB === "1") {
+    try {
+      const db = await getFrequencia({
+        from: from.toISOString(),
+        to: to.toISOString(),
+        groupBy,
+        classId,
+        alunoId,
+        limit,
+      });
+
+      const data = db.series.map((p) => ({
+        date: p.date,
+        presencas: p.value,
+      }));
+
+      return res.json({
+        filters: {
+          from: from.toISOString().slice(0, 10),
+          to: to.toISOString().slice(0, 10),
+          groupBy,
+          classId: classId ?? null,
+          alunoId: alunoId ?? null,
+          limit,
+        },
+        data,
+        meta: { source: "db", count: data.length },
+      });
+    } catch (e) {
+      // fallback seguro para mock se o DB falhar
+      if (process.env.NODE_ENV !== "test") {
+        console.error(e);
+      }
+      // segue para o mock abaixo
+    }
+  }
+
+  // Mock atual (mesmo shape já usado no frontend)
+  const mock = enumerateDays(from, to).slice(0, limit);
   return res.json({
     filters: {
       from: from.toISOString().slice(0, 10),
@@ -34,7 +74,7 @@ frequenciaRouter.get("/", (req, res) => {
       alunoId: alunoId ?? null,
       limit,
     },
-    data,
-    meta: { source: "demo", count: data.length },
+    data: mock,
+    meta: { source: "demo", count: mock.length },
   });
 });
