@@ -1,56 +1,39 @@
 import { useEffect, useState } from "react";
-import axios from "axios";
+import { fetchRanking } from "../lib/api";
 
-type AlunoRank = { alunoId: string; nome: string; presencas: number };
+type Params = { from?: string; to?: string; limit?: number };
 
-export function useRankingAssiduidade(params?: { from?: string; to?: string; limit?: number }) {
-  const [data, setData] = useState<AlunoRank[]>([]);
-  const [loading, setLoading] = useState(true);
+type Row = { nome: string; presencas: number };
+
+export function useRankingAssiduidade({ from, to, limit = 10 }: Params) {
+  const [data, setData] = useState<Row[]>([]);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const API = import.meta.env.VITE_API_URL;
-  const TOKEN = import.meta.env.VITE_GESTOR_TOKEN;
-
   useEffect(() => {
-    let mounted = true;
     (async () => {
+      setLoading(true);
+      setError(null);
       try {
-        setLoading(true);
+        // defaults compatíveis com o backend
+        const pFrom = from ?? new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10);
+        const pTo   = to   ?? new Date().toISOString().slice(0, 10);
 
-        const base = API.replace(/\/$/, "");
-        const url = `${base}/analytics/assiduidade-top`;
-
-        const res = await axios.get(url, {
-          params: {
-            from: params?.from,
-            to: params?.to,
-            limit: params?.limit ?? 10,
-          },
-          headers: { Authorization: `Bearer ${TOKEN}` },
-        });
-
-        if (!mounted) return;
-
-        // Shape: { ranking: [{ userId, name, email, presencas }, ...] }
-        const arr = res.data?.ranking ?? [];
-        const items: AlunoRank[] = (Array.isArray(arr) ? arr : []).map((r: any) => ({
-          alunoId: r.userId ?? r.alunoId ?? "",
-          nome: r.name ?? r.nome ?? "",
-          presencas: Number(r.presencas ?? r.count ?? 0),
+        const resp = await fetchRanking({ from: pFrom, to: pTo, limit });
+        // mapeia alunoId -> nome (até termos o nome real do aluno)
+        const rows: Row[] = resp.data.map((r) => ({
+          nome: r.alunoId,
+          presencas: r.presencas,
         }));
-
-        setData(items);
-        setError(null);
+        setData(rows);
       } catch (e: any) {
-        setError(e?.response?.data?.message ?? e?.message ?? "Erro ao carregar ranking");
+        setError(e?.message || "Falha ao carregar ranking");
+        setData([]);
       } finally {
-        if (mounted) setLoading(false);
+        setLoading(false);
       }
     })();
-    return () => {
-      mounted = false;
-    };
-  }, [API, TOKEN, params?.from, params?.to, params?.limit]);
+  }, [from, to, limit]);
 
   return { data, loading, error };
 }

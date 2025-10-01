@@ -1,122 +1,142 @@
-import { useMemo } from "react";
-import { useHeatmapSemanaHora } from "../hooks/useHeatmapSemanaHora";
+import { useEffect, useMemo, useState } from "react";
+import { useDateRange } from "@/context/DateRangeContext";
+import { fetchJSON } from "@/lib/api"; // centralizador com base + headers + 401 handling
+import { getToken } from "@/lib/api";
+import { demoHeatmapWeekHour } from "@/lib/demo"; // seu mock já criado
 
+type Bin = { weekday: number; hour: number; count: number };
+type Props = { demo?: boolean };
 
-type Props = {
-  from?: string;
-  to?: string;
-  hoursRange?: [number, number]; // ex.: [6, 22]
-  className?: string;
-};
+const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 
-// labels dos dias (0=Dom)
-const WEEK_LABELS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+export default function HeatmapSemanaHoraCard({ demo = false }: Props) {
+  const { range } = useDateRange();
+  const [data, setData] = useState<Bin[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
-export default function HeatmapSemanaHoraCard({
-  from,
-  to,
-  hoursRange = [6, 22],
-  className,
-}: Props) {
-  const { data, loading, error, stats } = useHeatmapSemanaHora({ from, to });
-
-  const hours = useMemo(() => {
-    const [hStart, hEnd] = hoursRange;
-    const arr: number[] = [];
-    for (let h = hStart; h <= hEnd; h++) arr.push(h);
-    return arr;
-  }, [hoursRange]);
-
-  // normaliza 0..1
-  const scale = (v: number) => {
-    const { min, max } = stats;
-    if (max === min) return 0; // evita NaN
-    return (v - min) / (max - min);
-  };
-
-  // cor baseada na intensidade (sem especificar cores exatas no chart; aqui é CSS inline do card)
-  const colorFor = (v: number) => {
-    const t = scale(v); // 0..1
-    // interpolação simples de "transparente" para uma cor sólida neutra (usaremos apenas opacidade):
-    const alpha = 0.12 + t * 0.88; // mantém algo visível mesmo p/ valores baixos
-    // usa um cinza-azulado neutro
-    return `rgba(31, 41, 55, ${alpha})`; // tailwind gray-800 com alpha
-  };
-
-  // cria um índice rápido: weekday-hour -> ocupacao
-  const index = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const c of data) {
-      map.set(`${c.weekday}-${c.hour}`, c.ocupacao);
+  useEffect(() => {
+    let abort = false;
+    async function run() {
+      setLoading(true);
+      setErr(null);
+      try {
+        if (demo) {
+          // mock consistente por período (opcionalmente poderíamos semear por seed)
+          const mock = demoHeatmapWeekHour();
+          if (!abort) setData(mock);
+        } else {
+          const q = new URLSearchParams({ from: range.from, to: range.to });
+          const res = await fetchJSON(`/api/heatmap/week-hour?${q.toString()}`, {
+            headers: { Authorization: `Bearer ${getToken()}` },
+          });
+          // esperamos algo como: [{ weekday: 0..6, hour: 0..23, count }]
+          if (!abort) setData(Array.isArray(res) ? (res as Bin[]) : []);
+        }
+      } catch (e: any) {
+        if (!abort) setErr(e?.message ?? "erro ao carregar heatmap");
+      } finally {
+        if (!abort) setLoading(false);
+      }
     }
-    return map;
+    run();
+    return () => {
+      abort = true;
+    };
+  }, [range.from, range.to, demo]);
+
+  const { min, max } = useMemo(() => {
+    let mn = Number.POSITIVE_INFINITY;
+    let mx = 0;
+    for (const b of data) {
+      mn = Math.min(mn, b.count);
+      mx = Math.max(mx, b.count);
+    }
+    if (!isFinite(mn)) mn = 0;
+    return { min: mn, max: mx };
+  }, [data]);
+
+  const grid = useMemo(() => {
+    // monta matriz 7 x 24 (1 linha por weekday)
+    const rows: Bin[][] = Array.from({ length: 7 }, (_, wd) =>
+      Array.from({ length: 24 }, (_, hr) => {
+        const found = data.find((b) => b.weekday === wd && b.hour === hr);
+        return found ?? { weekday: wd, hour: hr, count: 0 };
+      })
+    );
+    return rows;
   }, [data]);
 
   return (
-    <div className={`rounded-2xl shadow p-4 bg-white/70 backdrop-blur ${className ?? ""}`}>
+    <div className="border rounded-xl p-4">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-lg font-semibold">Heatmap — Semana × Hora</h3>
-        <span className="text-xs text-gray-500">
-          {from && to ? `Período: ${from} → ${to}` : "Últimos 30 dias"}
-        </span>
+        <div className="flex items-center gap-2">
+          <h2 className="font-semibold">Heatmap — Semana × Hora</h2>
+          <span className="text-xs text-gray-500">
+            {range.from} → {range.to}
+          </span>
+        </div>
+        <div className="text-xs text-gray-500">
+          {loading ? "Carregando…" : err ? "Erro" : "OK"}
+          {demo && <span className="ml-2 px-1.5 py-0.5 border rounded">demo</span>}
+        </div>
       </div>
 
-      {loading && <div className="text-sm text-gray-500">Carregando...</div>}
-      {error && <div className="text-sm text-red-600">Erro: {error}</div>}
+      {err && (
+        <div className="text-sm text-red-600 mb-2">
+          {err} — verifique token/401 e backend.
+        </div>
+      )}
 
-      {!loading && !error && (
-        <div className="overflow-auto">
-          {/* Header de horas */}
-          <div className="grid" style={{ gridTemplateColumns: `80px repeat(${hours.length}, minmax(28px, 1fr))` }}>
-            <div /> 
-            {hours.map((h) => (
-              <div key={`h-${h}`} className="text-xs text-gray-600 text-center py-1">
+      <div className="overflow-x-auto">
+        {/* Cabeçalho com horas 0..23 */}
+        <div className="min-w-[960px]">
+          <div className="grid" style={{ gridTemplateColumns: `100px repeat(24, 1fr)` }}>
+            <div />{/* canto vazio */}
+            {Array.from({ length: 24 }, (_, h) => (
+              <div key={`h-${h}`} className="text-[11px] text-center text-gray-600 pb-1">
                 {String(h).padStart(2, "0")}h
               </div>
             ))}
           </div>
 
           {/* Linhas por dia da semana */}
-          {WEEK_LABELS.map((label, weekday) => (
+          {grid.map((row, rIdx) => (
             <div
-              key={`row-${weekday}`}
+              key={`row-${rIdx}`}
               className="grid items-center"
-              style={{ gridTemplateColumns: `80px repeat(${hours.length}, minmax(28px, 1fr))` }}
+              style={{ gridTemplateColumns: `100px repeat(24, 1fr)` }}
             >
-              {/* label do dia */}
-              <div className="text-xs text-gray-700 py-1">{label}</div>
+              <div className="text-sm text-gray-700 py-1 pr-2">{WEEKDAYS[rIdx]}</div>
+              {row.map((cell) => {
+                const v = cell.count ?? 0;
+                const intensity = max > min ? (v - min) / (max - min) : 0;
+                // mapeia 0..1 → light → dark (usando HSL, sem libs)
+                const bg = `hsl(220deg 90% ${92 - Math.round(intensity * 52)}%)`;
 
-              {/* células */}
-              {hours.map((h) => {
-                const v = index.get(`${weekday}-${h}`) ?? 0;
                 return (
                   <div
-                    key={`cell-${weekday}-${h}`}
-                    title={`${label} ${String(h).padStart(2, "0")}:00 — ${v} presenças`}
-                    className="m-0.5 rounded"
-                    style={{
-                      height: 24,
-                      background: colorFor(v),
-                    }}
+                    key={`c-${cell.weekday}-${cell.hour}`}
+                    title={`${WEEKDAYS[cell.weekday]} ${String(cell.hour).padStart(2, "0")}h — ${v}`}
+                    className="h-8 border-[0.5px] border-gray-200"
+                    style={{ background: bg }}
                   />
                 );
               })}
             </div>
           ))}
-
-          {/* legenda simples */}
-          <div className="flex items-center gap-2 mt-3">
-            <span className="text-xs text-gray-500">Menor</span>
-            <div className="flex-1 h-2 bg-gray-200 rounded overflow-hidden">
-              <div className="h-2" style={{ width: "100%", background: "linear-gradient(to right, rgba(31,41,55,0.12), rgba(31,41,55,1))" }} />
-            </div>
-            <span className="text-xs text-gray-500">Maior</span>
-            <span className="text-xs text-gray-500 ml-2">
-              (min={stats.min ?? 0}, max={stats.max ?? 0})
-            </span>
-          </div>
         </div>
-      )}
+      </div>
+
+      {/* legenda simples */}
+      <div className="mt-3 flex items-center gap-2 text-xs text-gray-600">
+        <span>Min</span>
+        <div className="h-3 w-24 rounded" style={{ background: "hsl(220deg 90% 92%)" }} />
+        <div className="h-3 w-24 rounded" style={{ background: "hsl(220deg 90% 70%)" }} />
+        <div className="h-3 w-24 rounded" style={{ background: "hsl(220deg 90% 40%)" }} />
+        <span>Max</span>
+        <span className="ml-3">({min} → {max})</span>
+      </div>
     </div>
   );
 }

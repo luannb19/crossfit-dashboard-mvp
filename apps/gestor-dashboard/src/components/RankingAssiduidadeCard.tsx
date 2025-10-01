@@ -1,44 +1,87 @@
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { useRankingAssiduidade } from "../hooks/useRankingAssiduidade";
+import { useEffect, useState } from "react";
+import { useDateRange } from "@/context/DateRangeContext";
+import { fetchJSON, getToken } from "@/lib/api";
+import { demoRankingAssiduidade } from "@/lib/demo";
 
-type Props = { from?: string; to?: string; limit?: number; className?: string };
+type Item = {
+  pos: number;
+  memberId: string;
+  nome: string;
+  presencas: number;
+};
 
-export default function RankingAssiduidadeCard({ from, to, limit = 10, className }: Props) {
-  const { data, loading, error } = useRankingAssiduidade({ from, to, limit });
+export default function RankingAssiduidadeCard({ demo = false }: { demo?: boolean }) {
+  const { range } = useDateRange();
+  const [data, setData] = useState<Item[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let abort = false;
+    (async () => {
+      setLoading(true);
+      setErr(null);
+      try {
+        if (demo) {
+          const mock = demoRankingAssiduidade();
+          if (!abort) setData(mock);
+        } else {
+          const q = new URLSearchParams({ from: range.from, to: range.to });
+          const res = await fetchJSON(`/api/assiduidade/ranking?${q.toString()}`, {
+            headers: { Authorization: `Bearer ${getToken()}` },
+          });
+          // back esperado: [{ memberId, nome, presencas }, ...]; ordenamos e numeramos
+          const arr = Array.isArray(res) ? res as Omit<Item, "pos">[] : [];
+          const sorted = arr
+            .sort((a, b) => (b.presencas ?? 0) - (a.presencas ?? 0))
+            .map((it, i) => ({ ...it, pos: i + 1 }));
+          if (!abort) setData(sorted);
+        }
+      } catch (e: any) {
+        if (!abort) setErr(e?.message ?? "erro ao carregar ranking");
+      } finally {
+        if (!abort) setLoading(false);
+      }
+    })();
+    return () => { abort = true; };
+  }, [range.from, range.to, demo]);
 
   return (
-    <div className={`rounded-2xl shadow p-4 bg-white/70 backdrop-blur ${className ?? ""}`}>
+    <div className="border rounded-xl p-4">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-lg font-semibold">Ranking de Assiduidade</h3>
-        <span className="text-xs text-gray-500">{from && to ? `Período: ${from} → ${to}` : "Últimos 30 dias"}</span>
+        <div className="flex items-center gap-2">
+          <h2 className="font-semibold">Ranking de Assiduidade</h2>
+          <span className="text-xs text-gray-500">{range.from} → {range.to}</span>
+        </div>
+        <div className="text-xs text-gray-500">
+          {loading ? "Carregando…" : err ? "Erro" : "OK"}
+          {demo && <span className="ml-2 px-1.5 py-0.5 border rounded">demo</span>}
+        </div>
       </div>
 
-      {loading && <div className="text-sm text-gray-500">Carregando...</div>}
-      {error && <div className="text-sm text-red-600">Erro: {error}</div>}
-      {!loading && !error && (!data || data.length === 0) && (
-        <div className="text-sm text-gray-500">Sem dados para o período.</div>
-      )}
+      {err && <div className="text-sm text-red-600 mb-2">{err}</div>}
 
-      {!loading && !error && data?.length > 0 && (
-        <div className="h-64">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data} margin={{ left: 12, right: 12, top: 4, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis
-                dataKey="nome"
-                tick={{ fontSize: 12 }}
-                interval={0}
-                angle={-20}
-                textAnchor="end"
-                height={50}
-              />
-              <YAxis tick={{ fontSize: 12 }} />
-              <Tooltip />
-              <Bar dataKey="presencas" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      )}
+      <ol className="divide-y">
+        {data.length === 0 && !loading && !err && (
+          <li className="py-3 text-sm text-gray-500">Sem dados no período.</li>
+        )}
+        {data.map((row) => (
+          <li key={row.memberId} className="py-2 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-7 h-7 rounded-full border flex items-center justify-center text-xs font-semibold">
+                {row.pos}
+              </div>
+              <div className="flex flex-col">
+                <span className="text-sm font-medium">{row.nome}</span>
+                <span className="text-xs text-gray-500">ID: {row.memberId}</span>
+              </div>
+            </div>
+            <div className="text-sm">
+              <span className="font-semibold">{row.presencas}</span> presenças
+            </div>
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }

@@ -1,80 +1,49 @@
-import { useEffect, useMemo, useState } from "react";
-import axios from "axios";
+// src/hooks/useHeatmapSemanaHora.ts
+import { useEffect, useState } from "react";
+import { fetchHeatmap } from "../lib/api"; // caminho RELATIVO
 
-export type HeatCell = {
-  weekday: number;   // 0=Dom, 1=Seg, ... 6=Sáb
-  hour: number;      // 0..23
-  ocupacao: number;  // valor em %
-};
+type Params = { from?: string; to?: string };
+type Cell = { weekday: number; hour: number; ocupacao: number };
+type Stats = { min: number; max: number };
 
-type ApiRow = {
-  weekday: number;
-  hour: number;
-  avg: number;
-};
-
-const HEATMAP_PATH = "/analytics/heatmap";
-
-export function useHeatmapSemanaHora(params?: { from?: string; to?: string }) {
-  const [data, setData] = useState<HeatCell[]>([]);
-  const [loading, setLoading] = useState(true);
+export function useHeatmapSemanaHora({ from, to }: Params) {
+  const [data, setData] = useState<Cell[]>([]);
+  const [stats, setStats] = useState<Stats>({ min: 0, max: 0 });
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const API = import.meta.env.VITE_API_URL;
-  const TOKEN = import.meta.env.VITE_GESTOR_TOKEN;
-
   useEffect(() => {
-    let mounted = true;
     (async () => {
+      setLoading(true);
+      setError(null);
       try {
-        setLoading(true);
-        const base = API.replace(/\/$/, "");
-        const url = `${base}${HEATMAP_PATH}`;
+        const pFrom = from ?? new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10);
+        const pTo   = to   ?? new Date().toISOString().slice(0, 10);
 
-        const today = new Date();
-        const toDefault = today.toISOString().slice(0, 10);
-        const fromDefault = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000)
-          .toISOString()
-          .slice(0, 10);
+        const resp = await fetchHeatmap({ from: pFrom, to: pTo });
 
-        const res = await axios.get(url, {
-          params: {
-            from: params?.from ?? fromDefault,
-            to: params?.to ?? toDefault,
-          },
-          headers: { Authorization: `Bearer ${TOKEN}` },
-        });
-
-        if (!mounted) return;
-
-        // backend retorna { from, to, heat: [...] }
-        const arr: ApiRow[] = res.data?.heat ?? [];
-
-        const parsed: HeatCell[] = arr.map((r) => ({
-          weekday: r.weekday,
-          hour: r.hour,
-          ocupacao: Math.round((r.avg ?? 0) * 100), // normaliza pra %
+        // Backend: dow = 1..7 (1=Seg … 7=Dom) -> UI: weekday = 0..6 (0=Dom)
+        const cells: Cell[] = resp.data.map(b => ({
+          weekday: b.dow % 7,     // 7 -> 0
+          hour: b.hour,
+          ocupacao: b.presencas,
         }));
 
-        setData(parsed);
-        setError(null);
+        const vals = cells.map(c => c.ocupacao);
+        const min = vals.length ? Math.min(...vals) : 0;
+        const max = vals.length ? Math.max(...vals) : 0;
+
+        setData(cells);
+        setStats({ min, max });
       } catch (e: any) {
-        setError(e?.response?.data?.message ?? e?.message ?? "Erro ao carregar heatmap");
+        setError(e?.message || "Erro ao carregar heatmap");
+        setData([]);
+        setStats({ min: 0, max: 0 });
       } finally {
-        if (mounted) setLoading(false);
+        setLoading(false);
       }
     })();
-    return () => {
-      mounted = false;
-    };
-  }, [API, TOKEN, params?.from, params?.to]);
+  }, [from, to]);
 
-  const stats = useMemo(() => {
-    const values = data.map((c) => c.ocupacao);
-    const min = values.length ? Math.min(...values) : 0;
-    const max = values.length ? Math.max(...values) : 0;
-    return { min, max };
-  }, [data]);
-
-  return { data, loading, error, stats };
+  return { data, stats, loading, error };
 }

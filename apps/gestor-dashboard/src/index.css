@@ -1,1 +1,6 @@
 @import "tailwindcss";
+
+/* Sinal claro de que o CSS carregou */
+body { background: #f9fafb; }
+
+html, body, #root { height: 100%; }
