@@ -16,7 +16,8 @@ type Params = {
 
 const MAX_LIMIT = 365;
 
-function sanitizeTableName(name: string) {
+function sanitizeIdent(name: string) {
+  // Permite apenas letras, números e underscore
   return name.replace(/[^a-zA-Z0-9_]/g, "");
 }
 
@@ -38,25 +39,43 @@ export async function getFrequencia({
   const prisma = new PrismaClient();
   try {
     const g = truncateExpr(groupBy);
+
+    // Tabela e colunas configuráveis por ENV
     const tblDefault = process.env.FREQ_TABLE || "attendance";
-    const tbl = sanitizeTableName(tableName || tblDefault);
+    const COL_TIME = sanitizeIdent(process.env.FREQ_COL_TIME || "happened_at");
+    const COL_CLASS = sanitizeIdent(process.env.FREQ_COL_CLASS || "class_id");
+    const COL_ALUNO = sanitizeIdent(process.env.FREQ_COL_ALUNO || "aluno_id");
+    const tbl = sanitizeIdent(tableName || tblDefault);
+
     const lim = Math.min(Math.max(limit ?? MAX_LIMIT, 1), MAX_LIMIT);
 
-    const rows: { bucket: Date; qty: number }[] = await prisma.$queryRawUnsafe(
-      `
-      SELECT date_trunc('${g}', happened_at) AS bucket, COUNT(*)::int AS qty
+    // Monta WHERE dinâmico com placeholders corretos
+    const params: unknown[] = [from, to];
+    let whereExtra = "";
+    let idx = 3;
+
+    if (classId) {
+      whereExtra += ` AND "${COL_CLASS}" = $${idx++}`;
+      params.push(classId);
+    }
+    if (alunoId) {
+      whereExtra += ` AND "${COL_ALUNO}" = $${idx++}`;
+      params.push(alunoId);
+    }
+
+    const sql = `
+      SELECT date_trunc('${g}', "${COL_TIME}") AS bucket, COUNT(*)::int AS qty
       FROM "${tbl}"
-      WHERE happened_at BETWEEN $1::timestamp AND $2::timestamp
-        ${classId ? `AND class_id = $3` : ""}
-        ${alunoId ? `AND aluno_id = $4` : ""}
+      WHERE "${COL_TIME}" BETWEEN $1::timestamp AND $2::timestamp
+      ${whereExtra}
       GROUP BY 1
       ORDER BY 1 ASC
       LIMIT ${lim}
-      `,
-      from,
-      to,
-      ...(classId ? [classId] : []),
-      ...(alunoId ? [alunoId] : []),
+    `;
+
+    const rows: { bucket: Date; qty: number }[] = await prisma.$queryRawUnsafe(
+      sql,
+      ...params,
     );
 
     const series = rows.map((r) => ({

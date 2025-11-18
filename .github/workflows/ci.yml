@@ -49,6 +49,10 @@ jobs:
           node -v
           npm -v
 
+      # (opcional) deixar npm 11 no CI, igual ao local
+      - name: Upgrade npm (optional)
+        run: npm i -g npm@^11
+
       - name: Install deps
         run: |
           if [ -f package-lock.json ]; then
@@ -84,7 +88,13 @@ jobs:
       - name: Build
         run: npm run build --if-present
 
-      - name: Backend tests (coverage)
+      - name: Backend tests (coverage) — DB path ON
+        env:
+          USE_FREQ_DB: '1'
+          FREQ_TABLE: attendance
+          FREQ_COL_TIME: happened_at
+          FREQ_COL_CLASS: class_id
+          FREQ_COL_ALUNO: aluno_id
         run: npm run test:coverage
 
       - name: Publicar artefato de coverage (HTML)
@@ -144,5 +154,3 @@ jobs:
 
       - name: Tests
         run: npm test --if-present
-
-

@@ -55,3 +55,53 @@ model Treino {
   publico     Boolean  @default(true)
   createdAt   DateTime @default(now())
 }
+
+// --- Pagamentos pontuais (Checkout "payment": IA 30 dias) ---
+model Payment {
+  id               String   @id @default(cuid())
+  // chaves da Stripe
+  stripeSessionId  String   @unique
+  stripeIntentId   String?  @unique
+  stripeCustomerId String?
+  priceId          String?
+
+  // dados de valor
+  amount           Int?     // em centavos
+  currency         String?  // "brl", etc.
+
+  // "requires_payment_method" | "processing" | "succeeded" | ...
+  status           String
+
+  // "payment" | "subscription"
+  mode             String
+
+  customerEmail    String?
+  userId           String?  // se você vincular usuários por e-mail/ID depois
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([customerEmail])
+  @@index([mode, status])
+}
+
+// --- Assinaturas (Checkout "subscription": Plano Mensal) ---
+model Subscription {
+  id                String   @id @default(cuid())
+  stripeSubId       String   @unique
+  stripeCustomerId  String?
+  priceId           String?
+  status            String   // "trialing" | "active" | "past_due" | "canceled" | "incomplete" | ...
+  currentPeriodEnd  DateTime?
+  cancelAtPeriodEnd Boolean? @default(false)
+
+  customerEmail     String?
+  userId            String?
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([customerEmail])
+  @@index([status])
+}
+

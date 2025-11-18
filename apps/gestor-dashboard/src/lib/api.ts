@@ -30,21 +30,30 @@ export type HeatmapResponse = {
 };
 
 // ===== Config =====
-// Em dev, deixe VITE_API_BASE_URL vazio para usar o proxy do Vite.
-// Se preencher (ex.: http://localhost:4000), as chamadas vão direto ao backend.
-const API_BASE: string = (import.meta as any)?.env?.VITE_API_BASE_URL ?? "";
+// Use VITE_API_BASE_URL quando definido; senão, fallback para http://localhost:4000
+function apiBase(): string {
+  const envBase =
+    (import.meta as any)?.env?.VITE_API_BASE_URL ??
+    (import.meta as any)?.env?.API_BASE_URL; // backup, se existir
+  return envBase && String(envBase).trim().length > 0
+    ? String(envBase)
+    : "http://localhost:4000";
+}
 
 // ===== Helpers: token =====
+const TOKEN_KEY = "token";
+
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
-  return localStorage.getItem("token");
+  return localStorage.getItem(TOKEN_KEY);
 }
 export function setToken(token: string) {
-  if (typeof window !== "undefined") localStorage.setItem("token", token);
+  if (typeof window !== "undefined") localStorage.setItem(TOKEN_KEY, token);
 }
 export function clearToken() {
-  if (typeof window !== "undefined") localStorage.removeItem("token");
+  if (typeof window !== "undefined") localStorage.removeItem(TOKEN_KEY);
 }
+
 function authHeader(): Record<string, string> {
   const token = getToken();
   if (!token) return {};
@@ -53,23 +62,27 @@ function authHeader(): Record<string, string> {
 }
 
 // ===== Fetch canônico (JSON) =====
-export async function fetchJSON<T>(url: string, init: RequestInit = {}): Promise<T> {
+export async function fetchJSON<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers || {});
-  // Define Content-Type apenas se o chamador não definiu
+  // Content-Type só quando for necessário (POST/PUT/PATCH normalmente)
   if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
 
   // Aplica Authorization se houver
   const auth = authHeader();
-  Object.entries(auth).forEach(([k, v]) => {
+  for (const [k, v] of Object.entries(auth)) {
     if (!headers.has(k)) headers.set(k, v);
-  });
+  }
+
+  // Prefixa base quando for caminho relativo
+  const url = /^https?:\/\//i.test(path) ? path : `${apiBase()}${path}`;
 
   const res = await fetch(url, { ...init, headers });
 
-  // Tratamento centralizado de 401
+  // Tratamento 401 centralizado
   if (res.status === 401) {
-    clearToken();
     const body = await res.text().catch(() => "");
+    // opcional: limpar token para forçar novo login
+    // clearToken();
     throw new Error(`HTTP 401: ${body || "Unauthorized — faça login novamente."}`);
   }
 
@@ -78,22 +91,34 @@ export async function fetchJSON<T>(url: string, init: RequestInit = {}): Promise
     throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
   }
 
-  // As rotas deste arquivo retornam JSON
-  return res.json() as Promise<T>;
+  const ct = res.headers.get("content-type") || "";
+  if (ct.includes("application/json")) {
+    return (await res.json()) as T;
+  }
+  // Se a rota não retornar JSON, devolve null para não quebrar
+  return null as unknown as T;
 }
 
 // ===== Auth =====
 export async function login(email: string, password: string): Promise<string> {
-  const base = API_BASE || ""; // com proxy do Vite, mantém vazio
   const body = await fetchJSON<{ token?: string; accessToken?: string; jwt?: string }>(
-    `${base}/auth/login`,
+    `/auth/login`,
     {
       method: "POST",
       body: JSON.stringify({ email, password }),
     }
   );
-  const tok = body.token ?? body.accessToken ?? body.jwt;
+  const tok = body?.token ?? body?.accessToken ?? body?.jwt;
   if (!tok) throw new Error("Resposta de login não trouxe token");
+  setToken(tok);
+  return tok;
+}
+
+// (Opcional) obter dev-token direto do front, útil no DevLogin
+export async function getDevToken(): Promise<string> {
+  const r = await fetchJSON<{ token: string }>(`/api/auth/dev-token`, { method: "POST" });
+  const tok = r?.token;
+  if (!tok) throw new Error("Falha ao obter dev-token");
   setToken(tok);
   return tok;
 }
@@ -101,7 +126,7 @@ export async function login(email: string, password: string): Promise<string> {
 // ===== Frequência (ocupação por dia/semana/mês) =====
 export async function fetchFrequencia(params: {
   from: string; // YYYY-MM-DD
-  to: string;   // YYYY-MM-DD
+  to: string; // YYYY-MM-DD
   groupBy?: GroupBy;
   classId?: string;
   alunoId?: string;
@@ -115,8 +140,7 @@ export async function fetchFrequencia(params: {
   if (params.alunoId) q.set("alunoId", params.alunoId);
   if (params.limit != null) q.set("limit", String(params.limit));
 
-  const base = API_BASE || "";
-  return fetchJSON<FrequenciaResponse>(`${base}/api/frequencia?${q.toString()}`);
+  return fetchJSON<FrequenciaResponse>(`/api/frequencia?${q.toString()}`);
 }
 
 // ===== Ranking de assiduidade =====
@@ -126,8 +150,7 @@ export async function fetchRanking(params: { from: string; to: string; limit?: n
   q.set("to", params.to);
   if (params.limit != null) q.set("limit", String(params.limit));
 
-  const base = API_BASE || "";
-  return fetchJSON<RankingResponse>(`${base}/api/assiduidade/ranking?${q.toString()}`);
+  return fetchJSON<RankingResponse>(`/api/assiduidade/ranking?${q.toString()}`);
 }
 
 // ===== Heatmap Semana × Hora =====
@@ -136,8 +159,7 @@ export async function fetchHeatmap(params: { from: string; to: string }) {
   q.set("from", params.from);
   q.set("to", params.to);
 
-  const base = API_BASE || "";
-  return fetchJSON<HeatmapResponse>(`${base}/api/heatmap/week-hour?${q.toString()}`);
+  return fetchJSON<HeatmapResponse>(`/api/heatmap/week-hour?${q.toString()}`);
 }
 
 // ===== Util: período padrão (últimos N dias) =====

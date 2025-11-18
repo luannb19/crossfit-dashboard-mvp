@@ -1,6 +1,7 @@
+// apps/gestor-dashboard/src/components/OcupacaoPorDiaCard.tsx
 import { useEffect, useMemo, useState } from "react";
-import { useDateRange } from "@/context/DateRangeContext";
-import { fetchJSON, getToken } from "@/lib/api";
+import { usePeriod } from "@/context/PeriodContext";
+import { fetchJSON } from "@/lib/api";
 import { demoOcupacaoDia } from "@/lib/demo";
 import {
   ResponsiveContainer,
@@ -15,54 +16,150 @@ import {
 
 type Point = { date: string; presencas: number };
 
-export default function OcupacaoDiaCard({ demo = false }: { demo?: boolean }) {
-  const { range } = useDateRange();
+// --------- helpers de normalização ---------
+// --------- helpers de normalização ---------
+function toInt(n: any): number {
+  const v = Number(n);
+  return Number.isFinite(v) ? v : 0;
+}
+
+function isObj(x: any): x is Record<string, any> {
+  return x !== null && typeof x === "object";
+}
+
+// Extrai uma lista de {date, presencas} tolerando diversos formatos de payload
+function extractOcupacao(resp: any): { date: string; presencas: number }[] {
+  if (!resp) return [];
+
+  const top = resp;
+  const nested = isObj(resp?.data) ? resp.data : {};
+
+  // 1) caminhos já no formato de tabela
+  if (
+    Array.isArray(top.data) &&
+    top.data.every((d: any) => isObj(d) && ("date" in d) && ("presencas" in d || "value" in d || "ocupacao" in d))
+  ) {
+    return top.data.map((d: any) => ({
+      date: String(d.date),
+      presencas: toInt(d.presencas ?? d.value ?? d.ocupacao),
+    }));
+  }
+  if (
+    Array.isArray(nested.data) &&
+    nested.data.every((d: any) => isObj(d) && ("date" in d) && ("presencas" in d || "value" in d || "ocupacao" in d))
+  ) {
+    return nested.data.map((d: any) => ({
+      date: String(d.date),
+      presencas: toInt(d.presencas ?? d.value ?? d.ocupacao),
+    }));
+  }
+  if (Array.isArray(top.items) && top.items.every(isObj)) {
+    return top.items.map((i: any) => ({
+      date: String(i.date),
+      presencas: toInt(i.presencas ?? i.value ?? i.ocupacao),
+    }));
+  }
+  if (Array.isArray(nested.items) && nested.items.every(isObj)) {
+    return nested.items.map((i: any) => ({
+      date: String(i.date),
+      presencas: toInt(i.presencas ?? i.value ?? i.ocupacao),
+    }));
+  }
+
+  // 2) séries { date, value } / { date, ocupacao }
+  const series =
+    (Array.isArray(top.series) && top.series) ||
+    (Array.isArray(nested.series) && nested.series) ||
+    [];
+  if (series.length && series.every(isObj)) {
+    return series.map((s: any) => ({
+      date: String(s.date ?? s.day ?? s.d ?? s.x ?? ""),
+      presencas: toInt(s.presencas ?? s.value ?? s.ocupacao ?? s.y),
+    }));
+  }
+
+  // 3) points { x, y }
+  const points =
+    (Array.isArray(top.points) && top.points) ||
+    (Array.isArray(nested.points) && nested.points) ||
+    [];
+  if (points.length && points.every(isObj)) {
+    return points.map((p: any) => ({ date: String(p.x), presencas: toInt(p.y) }));
+  }
+
+  // 4) labels + values/data (arrays numéricos)
+  const labels: string[] =
+    (Array.isArray(top.labels) && top.labels) ||
+    (Array.isArray(nested.labels) && nested.labels) ||
+    [];
+
+  const values: number[] =
+    (Array.isArray(top.data) && top.data.every((x: any) => typeof x === "number") && top.data) ||
+    (Array.isArray(nested.values) && nested.values.every((x: any) => typeof x === "number") && nested.values) ||
+    (Array.isArray(nested.data) && nested.data.every((x: any) => typeof x === "number") && nested.data) ||
+    [];
+
+  if (labels.length && values.length && labels.length === values.length) {
+    return labels.map((d, i) => ({ date: String(d), presencas: toInt(values[i]) }));
+  }
+
+  return [];
+}
+
+
+// -------------------------------------------
+
+export default function OcupacaoPorDiaCard({ demo = false }: { demo?: boolean }) {
+  const { from, to } = usePeriod();
   const [data, setData] = useState<Point[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     let abort = false;
+
     (async () => {
       setLoading(true);
       setErr(null);
       try {
         if (demo) {
-          const mock = demoOcupacaoDia(range.from, range.to);
+          const mock = demoOcupacaoDia(from, to);
           if (!abort) setData(mock);
         } else {
-          // backend estável informou /frequencia; usamos groupBy=day
-          const q = new URLSearchParams({ from: range.from, to: range.to, groupBy: "day" });
-          const res = await fetchJSON(`/frequencia?${q.toString()}`, {
-            headers: { Authorization: `Bearer ${getToken()}` },
-          });
-          // formatos aceitos:
-          // 1) [{ date: "YYYY-MM-DD", presencas: number }, ...]
-          // 2) { series: [...] }  -> normalizamos
-          const arr: any[] = Array.isArray(res) ? res : Array.isArray(res?.series) ? res.series : [];
-          const normalized: Point[] = arr.map((d: any) => ({
-            date: (d.date ?? d.day ?? d.dt ?? "").slice(0, 10),
-            presencas: Number(d.presencas ?? d.count ?? 0),
-          }));
-          if (!abort) setData(normalized);
+          const q = new URLSearchParams({ from, to }).toString();
+          // Aceita tanto payload antigo (period+data) quanto o adaptado (labels/data/series/items etc.)
+          const res = await fetchJSON<any>(`/api/ocupacao/dia?${q}`);
+          const normalized = extractOcupacao(res);
+          if (!abort) setData(Array.isArray(normalized) ? normalized : []);
         }
       } catch (e: any) {
-        if (!abort) setErr(e?.message ?? "erro ao carregar ocupação");
+        if (!abort) {
+          setErr(e?.message ?? "erro ao carregar ocupação");
+          setData([]);
+        }
       } finally {
         if (!abort) setLoading(false);
       }
     })();
-    return () => { abort = true; };
-  }, [range.from, range.to, demo]);
 
-  const maxY = useMemo(() => Math.max(10, ...data.map((d) => d.presencas || 0)), [data]);
+    return () => {
+      abort = true;
+    };
+  }, [from, to, demo]);
+
+  const maxY = useMemo(
+    () => Math.max(10, ...data.map((d) => d.presencas || 0)),
+    [data]
+  );
 
   return (
     <div className="border rounded-xl p-4">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <h2 className="font-semibold">Ocupação por dia</h2>
-          <span className="text-xs text-gray-500">{range.from} → {range.to}</span>
+          <span className="text-xs text-gray-500">
+            {from} → {to}
+          </span>
         </div>
         <div className="text-xs text-gray-500">
           {loading ? "Carregando…" : err ? "Erro" : "OK"}
@@ -76,11 +173,7 @@ export default function OcupacaoDiaCard({ demo = false }: { demo?: boolean }) {
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data}>
             <CartesianGrid strokeDasharray="3 3" />
-            <XAxis
-              dataKey="date"
-              tick={{ fontSize: 11 }}
-              minTickGap={20}
-            />
+            <XAxis dataKey="date" tick={{ fontSize: 11 }} minTickGap={20} />
             <YAxis
               domain={[0, Math.ceil(maxY * 1.1)]}
               allowDecimals={false}
@@ -102,7 +195,7 @@ export default function OcupacaoDiaCard({ demo = false }: { demo?: boolean }) {
         </ResponsiveContainer>
       </div>
 
-      {/* tabela compacta opcional abaixo do gráfico */}
+      {/* tabela compacta */}
       <div className="mt-3 overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -113,7 +206,11 @@ export default function OcupacaoDiaCard({ demo = false }: { demo?: boolean }) {
           </thead>
           <tbody className="divide-y">
             {data.length === 0 && !loading && !err && (
-              <tr><td colSpan={2} className="py-2 text-gray-500">Sem dados no período.</td></tr>
+              <tr>
+                <td colSpan={2} className="py-2 text-gray-500">
+                  Sem dados no período.
+                </td>
+              </tr>
             )}
             {data.map((d) => (
               <tr key={d.date}>
