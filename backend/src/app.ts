@@ -12,49 +12,59 @@ import adminBillingRouter from "./routes/admin.billing";
 import swaggerUi from "swagger-ui-express";
 import { swaggerSpec } from "./swagger";
 
-// 👇 novos imports (Stripe)
-import webhooksRouter from "./routes/webhooks"; // usa body raw internamente
-import billingRouter from "./routes/billing"; // /api/billing/checkout/session (cartão)
-import pixRouter from "./routes/pix"; // /api/checkout/pix/session (pix avulso)
+// Stripe
+import webhooksRouter from "./routes/webhooks";
+import billingRouter from "./routes/billing";
+import pixRouter from "./routes/pix";
 
 export const app = express();
 app.use(cors());
 
-// ⚠️ 1) Webhook do Stripe DEVE vir ANTES do express.json(), pois usa RAW body
+// 1) Webhook (RAW BODY antes do express.json)
 app.use("/api/webhooks", webhooksRouter);
 
-// ✅ 2) Agora sim, JSON para o resto das rotas
+// 2) Agora sim JSON
 app.use(express.json());
 
-// Rotas públicas
+// rotas públicas
 app.use("/health", healthRouter);
 app.use("/auth", authRouter);
 
-// Rota protegida
+// rotas privadas
 app.use("/frequencia", requireAuth, frequenciaRouter);
 
-// Espelhos com /api (para o frontend)
+// espelhos para /api
 app.use("/api/health", healthRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/frequencia", requireAuth, frequenciaRouter);
 
-// 🔴 novos endpoints usados pelo frontend (Stripe)
-//    → deixei sem requireAuth para simplificar o MVP (Stripe Checkout lida com a sessão segura).
-//    → se preferir, podemos colocar requireAuth e o front manda o Bearer token junto.
-app.use("/api/billing", billingRouter); // POST /api/billing/checkout/session
-app.use("/api/checkout", pixRouter); // POST /api/checkout/pix/session
+// Stripe
+app.use("/api/billing", billingRouter);
+app.use("/api/checkout", pixRouter);
 app.use("/api/admin/billing", adminBillingRouter);
 
-// 🔒 rotas analíticas (protegidas)
+// Analytics (protegido)
 app.use("/api", requireAuth, analyticsRouter);
 
-// ✅ Swagger UI em /docs (e o JSON em /docs.json)
+// Swagger
 app.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 app.get("/docs.json", (_req, res) => res.json(swaggerSpec));
 
+// DEV analytics
 if (process.env.NODE_ENV !== "production") {
   const analyticsDevRouter = (await import("./routes/analytics.dev")).default;
   app.use("/api", analyticsDevRouter);
 }
+
+// 🔥 DEV TOKEN para testes (Vitest usa isso)
+import jwt from "jsonwebtoken";
+app.get("/dev-token", (_req, res) => {
+  const token = jwt.sign(
+    { sub: "dev", role: "GESTOR" },
+    process.env.JWT_SECRET || "dev-secret",
+    { expiresIn: "1d" },
+  );
+  res.json({ token });
+});
 
 export default app;

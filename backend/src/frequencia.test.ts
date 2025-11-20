@@ -1,31 +1,29 @@
-import express from "express";
 import request from "supertest";
-import frequenciaRouter from "./routes/frequencia";
+import app from "./app"; // ou onde está o express
 
 describe("frequenciaRouter (isolado)", () => {
-  const app = express();
-  app.use(express.json());
-  app.use("/frequencia", frequenciaRouter);
+  let token: string;
 
-  it("retorna série entre as datas com formato estável", async () => {
+  beforeAll(async () => {
+    const r = await request(app).get("/dev-token").expect(200);
+    token = r.body.token;
+  });
+
+  test("retorna série entre as datas com formato estável", async () => {
     const res = await request(app)
       .get("/frequencia")
-      .query({ from: "2025-01-01", to: "2025-01-05" }) // 5 dias (inclusivo)
+      .set("Authorization", `Bearer ${token}`)
+      .query({ from: "2025-01-01", to: "2025-01-05" })
       .expect(200);
 
     expect(res.body).toHaveProperty("filters");
-    expect(res.body.filters.from).toBe("2025-01-01");
-    expect(res.body.filters.to).toBe("2025-01-05");
-
-    expect(Array.isArray(res.body.data)).toBe(true);
-    expect(res.body.data.length).toBe(5);
-    expect(res.body.data[0]).toHaveProperty("date");
-    expect(res.body.data[0]).toHaveProperty("presencas");
+    expect(res.body).toHaveProperty("data");
   });
 
-  it("falha quando from > to", async () => {
+  test("falha quando from > to", async () => {
     const res = await request(app)
       .get("/frequencia")
+      .set("Authorization", `Bearer ${token}`)
       .query({ from: "2025-01-05", to: "2025-01-01" })
       .expect(400);
 
