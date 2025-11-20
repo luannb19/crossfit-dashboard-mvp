@@ -100,34 +100,37 @@ export async function updateFromPaymentIntent(pi: Stripe.PaymentIntent) {
 /**
  * Subscription Updated Event (webhook)
  */
-export async function updateFromSubscriptionEvent(sub: Stripe.Subscription) {
-  const status = sub.status;
-  const customerId =
-    typeof sub.customer === "string" ? sub.customer : undefined;
-  const price = sub.items.data[0]?.price?.id;
+type StripeSubscriptionRaw = Stripe.Subscription & {
+  current_period_end?: number;
+};
 
-  // Campo correto no Stripe
+export async function updateFromSubscriptionEvent(sub: Stripe.Subscription) {
+  const s = sub as StripeSubscriptionRaw;
+
+  const status = s.status;
+  const customerId = typeof s.customer === "string" ? s.customer : undefined;
+  const price = s.items.data[0]?.price?.id;
+
+  const raw = s.current_period_end; // existe em runtime, falta no tipo TS
   const currentPeriodEnd =
-    typeof sub.current_period_end === "number"
-      ? new Date(sub.current_period_end * 1000)
-      : null;
+    typeof raw === "number" ? new Date(raw * 1000) : null;
 
   await prisma.subscription.upsert({
-    where: { stripeSubId: sub.id },
+    where: { stripeSubId: s.id },
     create: {
-      stripeSubId: sub.id,
+      stripeSubId: s.id,
       stripeCustomerId: customerId,
       priceId: price,
       status,
       currentPeriodEnd,
-      cancelAtPeriodEnd: sub.cancel_at_period_end ?? undefined,
+      cancelAtPeriodEnd: s.cancel_at_period_end ?? undefined,
     },
     update: {
       stripeCustomerId: customerId,
       priceId: price ?? undefined,
       status,
       currentPeriodEnd,
-      cancelAtPeriodEnd: sub.cancel_at_period_end ?? undefined,
+      cancelAtPeriodEnd: s.cancel_at_period_end ?? undefined,
     },
   });
 }
