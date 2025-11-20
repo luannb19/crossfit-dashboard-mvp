@@ -4,7 +4,7 @@ import cors from "cors";
 
 import { healthRouter } from "./routes/health";
 import { authRouter } from "./routes/auth";
-import { frequenciaRouter } from "./routes/frequencia";
+import frequenciaRouter from "./routes/frequencia";
 import { requireAuth } from "./middleware/requireAuth";
 import analyticsRouter from "./routes/analytics";
 import adminBillingRouter from "./routes/admin.billing";

@@ -1,6 +1,6 @@
 import express from "express";
 import request from "supertest";
-import { frequenciaRouter } from "./routes/frequencia";
+import frequenciaRouter from "./routes/frequencia";
 
 describe("frequenciaRouter (isolado)", () => {
   const app = express();

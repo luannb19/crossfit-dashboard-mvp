@@ -2,6 +2,9 @@
 import Stripe from "stripe";
 import { prisma } from "../lib/prisma";
 
+/**
+ * Checkout Session → cria Payment e Subscription (se existir no session)
+ */
 export async function upsertFromCheckoutSession(
   session: Stripe.Checkout.Session,
 ) {
@@ -10,15 +13,15 @@ export async function upsertFromCheckoutSession(
     (session.customer_details?.email ?? session.customer_email) || undefined;
   const customerId =
     typeof session.customer === "string" ? session.customer : undefined;
+
   const priceId =
     session.line_items?.data?.[0]?.price?.id ||
     ((session as any).metadata?.priceId as string | undefined);
 
-  // amount_total vem apenas após completed
   const amount = session.amount_total ?? undefined;
   const currency = session.currency ?? undefined;
 
-  // 1) Sempre upsert em Payment (mesmo em subscription) para ter o histórico do checkout
+  // Sempre cria um Payment (mesmo em subscription)
   await prisma.payment.upsert({
     where: { stripeSessionId: session.id },
     create: {
@@ -26,8 +29,8 @@ export async function upsertFromCheckoutSession(
       stripeCustomerId: customerId,
       priceId,
       customerEmail: email,
-      amount: amount ?? undefined,
-      currency: currency ?? undefined,
+      amount,
+      currency,
       status: (session.payment_status as string) || "unpaid",
       mode,
     },
@@ -35,14 +38,14 @@ export async function upsertFromCheckoutSession(
       stripeCustomerId: customerId,
       priceId,
       customerEmail: email,
-      amount: amount ?? undefined,
-      currency: currency ?? undefined,
+      amount,
+      currency,
       status: (session.payment_status as string) || "unpaid",
       mode,
     },
   });
 
-  // 2) Se for assinatura e já tiver subscription no session, garante Subscription
+  // Se for assinatura → cria a Subscription inicial
   if (mode === "subscription" && typeof session.subscription === "string") {
     await prisma.subscription.upsert({
       where: { stripeSubId: session.subscription },
@@ -51,7 +54,7 @@ export async function upsertFromCheckoutSession(
         stripeCustomerId: customerId,
         priceId,
         customerEmail: email,
-        status: "incomplete", // será atualizado por eventos da Subscription/Invoice
+        status: "incomplete",
       },
       update: {
         stripeCustomerId: customerId,
@@ -62,6 +65,9 @@ export async function upsertFromCheckoutSession(
   }
 }
 
+/**
+ * Payment Intent → atualiza um Payment existente
+ */
 export async function updateFromPaymentIntent(pi: Stripe.PaymentIntent) {
   const intentId = pi.id;
   const amount = typeof pi.amount === "number" ? pi.amount : undefined;
@@ -69,7 +75,6 @@ export async function updateFromPaymentIntent(pi: Stripe.PaymentIntent) {
   const email = (pi.receipt_email as string | undefined) ?? undefined;
   const customerId = typeof pi.customer === "string" ? pi.customer : undefined;
 
-  // amarre pelo intentId se já tiver Payment com esse intent (pode não ter; amarramos pelo session também)
   await prisma.payment.upsert({
     where: { stripeIntentId: intentId },
     create: {
@@ -92,14 +97,20 @@ export async function updateFromPaymentIntent(pi: Stripe.PaymentIntent) {
   });
 }
 
+/**
+ * Subscription Updated Event (webhook)
+ */
 export async function updateFromSubscriptionEvent(sub: Stripe.Subscription) {
   const status = sub.status;
   const customerId =
     typeof sub.customer === "string" ? sub.customer : undefined;
   const price = sub.items.data[0]?.price?.id;
-  const currentPeriodEnd = sub.current_period_end
-    ? new Date(sub.current_period_end * 1000)
-    : undefined;
+
+  // Campo correto no Stripe
+  const currentPeriodEnd =
+    typeof sub.current_period_end === "number"
+      ? new Date(sub.current_period_end * 1000)
+      : null;
 
   await prisma.subscription.upsert({
     where: { stripeSubId: sub.id },

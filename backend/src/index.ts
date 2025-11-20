@@ -97,7 +97,7 @@ app.get("/api/ocupacao/dia", async (req, res) => {
       points,
       meta,
       // nested (compat)
-      data: {
+      nested: {
         labels,
         values,
         data: values,

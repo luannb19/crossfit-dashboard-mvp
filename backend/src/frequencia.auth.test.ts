@@ -1,7 +1,7 @@
 import express from "express";
 import request from "supertest";
 import { requireAuth } from "./middleware/requireAuth";
-import { frequenciaRouter } from "./routes/frequencia";
+import frequenciaRouter from "./routes/frequencia";
 
 describe("GET /frequencia protegido por requireAuth", () => {
   const app = express();
