@@ -162,6 +162,23 @@ export async function fetchHeatmap(params: { from: string; to: string }) {
   return fetchJSON<HeatmapResponse>(`/api/heatmap/week-hour?${q.toString()}`);
 }
 
+// ===== Manager summary (one-glance KPIs) =====
+export type SummaryResponse = {
+  period: { from: string; to: string };
+  occupancyPercent: number;
+  totalCheckIns: number;
+  totalCapacity: number;
+  memberCount: number;
+  busiestDay: string | null;
+};
+
+export async function fetchSummary(params: { from: string; to: string }) {
+  const q = new URLSearchParams();
+  q.set("from", params.from);
+  q.set("to", params.to);
+  return fetchJSON<SummaryResponse>(`/api/analytics/summary?${q.toString()}`);
+}
+
 // ===== Util: período padrão (últimos N dias) =====
 export function getDefaultRange(days = 28): { from: string; to: string } {
   const to = new Date();

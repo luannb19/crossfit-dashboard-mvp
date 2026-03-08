@@ -121,14 +121,14 @@ analyticsRouter.get("/heatmap/week-hour", async (req, res) => {
   }
 });
 
-/* ------------------------------------------------------------------------------------------------
+/* ----------------------------------------------------------------------------------------------
  * 3) OCUPAÇÃO REAL POR DIA (presenças / capacidade)
  * ----------------------------------------------------------------------------------------------*/
-
 analyticsRouter.get("/ocupacao-por-dia", async (req, res) => {
   const from =
     (req.query.from as string) ??
     new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10);
+
   const to = (req.query.to as string) ?? new Date().toISOString().slice(0, 10);
 
   const ISO = /^\d{4}-\d{2}-\d{2}$/;
@@ -137,7 +137,7 @@ analyticsRouter.get("/ocupacao-por-dia", async (req, res) => {
   }
 
   try {
-    // 1) Todas as aulas do período com contagem de presenças
+    // 1) Busca todas as aulas no período com contagem real de presenças
     const classes = await prisma.class.findMany({
       where: {
         startAt: {
@@ -150,7 +150,7 @@ analyticsRouter.get("/ocupacao-por-dia", async (req, res) => {
       },
     });
 
-    // 2) Agrega por data (YYYY-MM-DD)
+    // 2) Agregar por dia (key YYYY-MM-DD)
     const agg: Record<string, { presencas: number; capacidade: number }> = {};
 
     for (const c of classes) {
@@ -169,7 +169,7 @@ analyticsRouter.get("/ocupacao-por-dia", async (req, res) => {
       agg[dateKey].capacidade += c.capacity ?? 0;
     }
 
-    // 3) Cria a série contínua from..to
+    // 3) Série contínua (garante todos os dias)
     const series = [];
     const cursor = new Date(`${from}T00:00:00.000Z`);
     const end = new Date(`${to}T00:00:00.000Z`);
@@ -183,18 +183,24 @@ analyticsRouter.get("/ocupacao-por-dia", async (req, res) => {
       }).format(cursor);
 
       const info = agg[dateKey] ?? { presencas: 0, capacidade: 0 };
+
       const ocupacaoRatio =
         info.capacidade > 0 ? info.presencas / info.capacidade : 0;
+
       const ocupacaoPercent = Math.round(ocupacaoRatio * 100);
 
       series.push({
         date: dateKey,
-        value: info.presencas, // compat com front atual
+
+        // valores base
         presencas: info.presencas,
         capacidade: info.capacidade,
-        ocupacaoPercent,
         ocupacaoRatio,
-        ocupacao: info.presencas, // compat com adapter antigo
+        ocupacaoPercent,
+
+        // compat com UI antiga
+        value: info.presencas,
+        ocupacao: info.presencas,
       });
 
       cursor.setUTCDate(cursor.getUTCDate() + 1);
@@ -215,6 +221,88 @@ analyticsRouter.get("/ocupacao-por-dia", async (req, res) => {
     return res.json({
       series: [],
       meta: { source: "error", error: String(e), from, to },
+    });
+  }
+});
+
+/* ----------------------------------------------------------------------------------------------
+ * 4) MANAGER SUMMARY — one-glance KPIs for the period (for dashboard + mobile home)
+ * ----------------------------------------------------------------------------------------------*/
+const WEEKDAY_NAMES = [
+  "Domingo",
+  "Segunda",
+  "Terça",
+  "Quarta",
+  "Quinta",
+  "Sexta",
+  "Sábado",
+];
+
+analyticsRouter.get("/summary", async (req, res) => {
+  const from =
+    (req.query.from as string) ??
+    new Date(Date.now() - 6 * 864e5).toISOString().slice(0, 10);
+  const to = (req.query.to as string) ?? new Date().toISOString().slice(0, 10);
+
+  const ISO = /^\d{4}-\d{2}-\d{2}$/;
+  if (!ISO.test(from) || !ISO.test(to)) {
+    return res.status(400).json({ error: "from/to inválidos (YYYY-MM-DD)" });
+  }
+
+  const fromDate = new Date(`${from}T00:00:00.000Z`);
+  const toDate = new Date(`${to}T23:59:59.999Z`);
+
+  try {
+    const [totalCheckIns, classes, memberCountResult, busiestRow] =
+      await Promise.all([
+        prisma.attendance.count({
+          where: { attendedAt: { gte: fromDate, lte: toDate } },
+        }),
+        prisma.class.findMany({
+          where: { startAt: { gte: fromDate, lte: toDate } },
+          select: { capacity: true },
+        }),
+        prisma.attendance.groupBy({
+          by: ["userId"],
+          where: { attendedAt: { gte: fromDate, lte: toDate } },
+        }),
+        prisma.$queryRawUnsafe<{ dow: number; count: bigint }[]>(
+          `
+        SELECT EXTRACT(DOW FROM ("Attendance"."attendedAt" AT TIME ZONE 'America/Sao_Paulo'))::int AS dow, COUNT(*)::bigint AS count
+        FROM "Attendance"
+        WHERE "Attendance"."attendedAt" >= $1::timestamptz AND "Attendance"."attendedAt" <= $2::timestamptz
+        GROUP BY 1
+        ORDER BY 2 DESC
+        LIMIT 1
+        `,
+          fromDate,
+          toDate,
+        ),
+      ]);
+
+    const totalCapacity = classes.reduce(
+      (sum, c) => sum + (c.capacity ?? 0),
+      0,
+    );
+    const occupancyPercent =
+      totalCapacity > 0 ? Math.round((totalCheckIns / totalCapacity) * 100) : 0;
+    const memberCount = memberCountResult.length;
+    const busiestDay =
+      busiestRow?.[0] != null ? WEEKDAY_NAMES[Number(busiestRow[0].dow)] : null;
+
+    return res.json({
+      period: { from, to },
+      occupancyPercent,
+      totalCheckIns,
+      totalCapacity,
+      memberCount,
+      busiestDay,
+    });
+  } catch (e: any) {
+    console.error("[analytics summary]", e?.message ?? e);
+    return res.status(500).json({
+      error: "Erro ao gerar resumo",
+      period: { from, to },
     });
   }
 });
