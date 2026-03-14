@@ -11,6 +11,10 @@ const TMP = "attendance_tmp_ci";
 describe("[CI] getFrequencia com tabela temporária", () => {
   beforeAll(async () => {
     if (!isCI) return;
+    // Colunas da tabela temporária (happened_at, class_id, aluno_id); forçar env para não usar attendedAt do schema real
+    process.env.FREQ_COL_TIME = "happened_at";
+    process.env.FREQ_COL_CLASS = "class_id";
+    process.env.FREQ_COL_ALUNO = "aluno_id";
     // tabela leve e sem WAL pra ficar rápido no CI
     await prisma.$executeRawUnsafe(`
       DROP TABLE IF EXISTS "${TMP}";

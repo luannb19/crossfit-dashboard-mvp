@@ -32,9 +32,12 @@ describe("[CI] rota /frequencia usando DB real (gate ligado)", () => {
         ('2025-01-03 09:00:00',  'c1', 'a1');
     `);
 
-    // 2) ligar o gate e apontar a tabela para a temporária
+    // 2) ligar o gate e apontar a tabela/colunas para a temporária (evita attendedAt do schema real)
     process.env.USE_FREQ_DB = "1";
     process.env.FREQ_TABLE = TMP;
+    process.env.FREQ_COL_TIME = "happened_at";
+    process.env.FREQ_COL_CLASS = "class_id";
+    process.env.FREQ_COL_ALUNO = "aluno_id";
 
     // 3) importar o app depois de setar as envs
     ({ app } = await import("./app"));
