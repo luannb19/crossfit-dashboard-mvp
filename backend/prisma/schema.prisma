@@ -48,13 +48,14 @@ enum Role {
   GESTOR
 }
 
-model Treino {
-  id          String   @id @default(cuid())
-  title       String
-  description String
-  publico     Boolean  @default(true)
-  createdAt   DateTime @default(now())
+enum WorkoutCategory {
+  METCON
+  STRENGTH
+  TECHNIQUE
+  MOBILITY
 }
+
+
 
 // --- Pagamentos pontuais (Checkout "payment": IA 30 dias) ---
 model Payment {
@@ -103,5 +104,25 @@ model Subscription {
 
   @@index([customerEmail])
   @@index([status])
+}
+
+// --- model workout ---
+model Workout {
+  id          String          @id @default(cuid())
+
+  // Relacionamento com a box/dono (ajuste o tipo conforme seu modelo de Box)
+  boxId       String
+  // box         Box             @relation(fields: [boxId], references: [id])
+
+  date        DateTime        // “dia do treino” (podemos usar 00:00 da box)
+  title       String
+  description String?
+
+  category    WorkoutCategory
+
+  videoUrl    String?
+
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
 }
 

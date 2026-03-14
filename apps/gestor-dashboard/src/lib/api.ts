@@ -162,6 +162,32 @@ export async function fetchHeatmap(params: { from: string; to: string }) {
   return fetchJSON<HeatmapResponse>(`/api/heatmap/week-hour?${q.toString()}`);
 }
 
+// ===== Occupancy heatmap (dayOfWeek × hour: checkins, capacity, occupancyPercent) =====
+export type OccupancyHeatmapCell = {
+  dayOfWeek: number;
+  hour: number;
+  checkins: number;
+  capacity: number;
+  occupancyPercent: number;
+};
+
+export type OccupancyHeatmapResponse = {
+  period: { from: string; to: string };
+  data: OccupancyHeatmapCell[];
+};
+
+export async function fetchOccupancyHeatmap(params: {
+  from: string;
+  to: string;
+}) {
+  const q = new URLSearchParams();
+  q.set("from", params.from);
+  q.set("to", params.to);
+  return fetchJSON<OccupancyHeatmapResponse>(
+    `/api/analytics/occupancy-heatmap?${q.toString()}`
+  );
+}
+
 // ===== Manager summary (one-glance KPIs) =====
 export type SummaryResponse = {
   period: { from: string; to: string };
@@ -177,6 +203,30 @@ export async function fetchSummary(params: { from: string; to: string }) {
   q.set("from", params.from);
   q.set("to", params.to);
   return fetchJSON<SummaryResponse>(`/api/analytics/summary?${q.toString()}`);
+}
+
+// ===== Member ranking (top 10 by check-ins) =====
+export type MemberRankingItem = {
+  userId: string;
+  name: string;
+  checkinCount: number;
+};
+
+export type MemberRankingResponse = {
+  period: { from: string; to: string };
+  data: MemberRankingItem[];
+};
+
+export async function fetchMemberRanking(params: {
+  from: string;
+  to: string;
+}) {
+  const q = new URLSearchParams();
+  q.set("from", params.from);
+  q.set("to", params.to);
+  return fetchJSON<MemberRankingResponse>(
+    `/api/analytics/member-ranking?${q.toString()}`
+  );
 }
 
 // ===== Util: período padrão (últimos N dias) =====

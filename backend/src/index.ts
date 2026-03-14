@@ -8,6 +8,11 @@ import frequencia from "./routes/frequencia";
 // ❌ removemos o router stub de heatmap para usar o adapter abaixo
 // import heatmap from "./routes/heatmap";
 import attendance from "./routes/attendance";
+// import workouts para criar treinos
+
+import { workoutsRouter } from "./routes/workouts";
+import { classesRouter } from "./routes/classes";
+import { usersRouter } from "./routes/users";
 
 // fetch nativo do Node 18+
 const fetchFn: typeof fetch = globalThis.fetch;
@@ -43,6 +48,9 @@ app.get("/dev-token", (_, res) => {
 // --- Rotas principais ---
 app.use("/api/analytics", analytics);
 app.use("/api/frequencia", frequencia);
+app.use("/api/workouts", workoutsRouter);
+app.use("/api/classes", classesRouter);
+app.use("/api/users", usersRouter);
 // ❌ sem router de heatmap aqui; usamos adapter mais abaixo
 app.use("/api/attendance", attendance);
 
@@ -68,18 +76,39 @@ app.get("/api/ocupacao/dia", async (req, res) => {
       base.data?.points ||
       [];
 
+    // ↘️ Novo: garante que % e capacidade sejam incluídos
     const series = Array.isArray(rawSeries)
       ? rawSeries.map((p: Record<string, unknown>) => ({
           date: p.date ?? p.day ?? p.d ?? p.x ?? null,
-          value: p.ocupacao ?? p.value ?? p.v ?? p.y ?? 0,
-          ocupacao: p.ocupacao ?? p.value ?? p.v ?? p.y ?? 0,
+
+          // Compatibilidade antiga
+          value: p.value ?? p.presencas ?? p.ocupacao ?? 0,
+          ocupacao: p.value ?? p.presencas ?? p.ocupacao ?? 0,
+
+          // Novos campos reais
+          presencas: p.presencas ?? p.value ?? 0,
+          capacidade: p.capacidade ?? 0,
+          ocupacaoPercent: p.ocupacaoPercent ?? null,
+          ocupacaoRatio: p.ocupacaoRatio ?? null,
         }))
       : [];
 
     const labels = series.map((p) => p.date);
     const values = series.map((p) => Number(p.value || 0));
-    const items = series.map((s) => ({ date: s.date, presencas: s.value }));
-    const points = series.map((s) => ({ x: s.date, y: s.value }));
+
+    // mantemos compatibilidade com UI antiga
+    const items = series.map((s) => ({
+      date: s.date,
+      presencas: s.presencas,
+      capacidade: s.capacidade,
+      ocupacaoPercent: s.ocupacaoPercent,
+    }));
+
+    const points = series.map((s) => ({
+      x: s.date,
+      y: s.value,
+      ocupacaoPercent: s.ocupacaoPercent,
+    }));
 
     const meta = {
       ...(base.meta || {}),
@@ -88,28 +117,29 @@ app.get("/api/ocupacao/dia", async (req, res) => {
     };
 
     return res.json({
-      // topo
       labels,
       data: values,
       series,
       items,
-      dataset: { label: "Ocupação", labels, data: values },
       points,
-      meta,
-      // nested (compat)
-      nested: {
+      dataset: { label: "Ocupação", labels, data: values },
+
+      // compat
+      data: {
         labels,
         values,
         data: values,
         series,
         items,
         rows: items,
-        dataset: { label: "Ocupação", labels, data: values },
         points,
+        dataset: { label: "Ocupação", labels, data: values },
       },
-      meta2: meta, // caso algum front leia 'meta2'
+
+      meta,
+      meta2: meta,
     });
-  } catch (err: unknown) {
+  } catch (err) {
     console.error("ocupacao/dia adapter error:", err);
     return res.status(500).json({ error: "adapter_failed" });
   }
@@ -185,6 +215,6 @@ app.get("/api/heatmap/week-hour", async (req, res) => {
 
 // --- Start ---
 const port = Number(process.env.PORT || 4000);
-app.listen(port, () => {
-  console.log(`🚀 Backend rodando em http://localhost:${port}`);
+app.listen(port, "0.0.0.0", () => {
+  console.log(`🚀 Backend rodando em http://0.0.0.0:${port}`);
 });

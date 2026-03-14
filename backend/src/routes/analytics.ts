@@ -122,6 +122,104 @@ analyticsRouter.get("/heatmap/week-hour", async (req, res) => {
 });
 
 /* ----------------------------------------------------------------------------------------------
+ * 2b) OCCUPANCY HEATMAP — dayOfWeek × hour with checkins, capacity, occupancyPercent
+ *     Uses Class.startAt + Class.capacity and Attendance per class.
+ * ----------------------------------------------------------------------------------------------*/
+analyticsRouter.get("/occupancy-heatmap", async (req, res) => {
+  const from =
+    (req.query.from as string) ??
+    new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10);
+  const to = (req.query.to as string) ?? new Date().toISOString().slice(0, 10);
+
+  const ISO = /^\d{4}-\d{2}-\d{2}$/;
+  if (!ISO.test(from) || !ISO.test(to)) {
+    return res.status(400).json({ error: "from/to inválidos (YYYY-MM-DD)" });
+  }
+
+  const fromDate = new Date(`${from}T00:00:00.000Z`);
+  const toDate = new Date(`${to}T23:59:59.999Z`);
+
+  try {
+    const classes = await prisma.class.findMany({
+      where: {
+        startAt: { gte: fromDate, lte: toDate },
+      },
+      include: { _count: { select: { Attendance: true } } },
+    });
+
+    const slotKey = (dow: number, hour: number) => `${dow}-${hour}`;
+    const capacityBySlot = new Map<string, number>();
+    const checkinsBySlot = new Map<string, number>();
+
+    const tz = "America/Sao_Paulo";
+    const dowMap: Record<string, number> = {
+      Sun: 0,
+      Mon: 1,
+      Tue: 2,
+      Wed: 3,
+      Thu: 4,
+      Fri: 5,
+      Sat: 6,
+    };
+    for (const c of classes) {
+      const parts = new Intl.DateTimeFormat("en", {
+        timeZone: tz,
+        weekday: "short",
+        hour: "2-digit",
+        hour12: false,
+      }).formatToParts(c.startAt);
+      const weekdayShort =
+        parts.find((p) => p.type === "weekday")?.value ?? "Sun";
+      const hourStr = parts.find((p) => p.type === "hour")?.value ?? "0";
+      const dow = dowMap[weekdayShort] ?? 0;
+      const hour = parseInt(hourStr, 10) || 0;
+      const key = slotKey(dow, hour);
+      capacityBySlot.set(
+        key,
+        (capacityBySlot.get(key) ?? 0) + (c.capacity ?? 0),
+      );
+      checkinsBySlot.set(
+        key,
+        (checkinsBySlot.get(key) ?? 0) + (c._count.Attendance ?? 0),
+      );
+    }
+
+    const data: {
+      dayOfWeek: number;
+      hour: number;
+      checkins: number;
+      capacity: number;
+      occupancyPercent: number;
+    }[] = [];
+
+    for (let dow = 0; dow < 7; dow++) {
+      for (let h = 0; h < 24; h++) {
+        const key = slotKey(dow, h);
+        const capacity = capacityBySlot.get(key) ?? 0;
+        const checkins = checkinsBySlot.get(key) ?? 0;
+        const occupancyPercent =
+          capacity > 0 ? Math.round((checkins / capacity) * 100) : 0;
+        data.push({
+          dayOfWeek: dow,
+          hour: h,
+          checkins,
+          capacity,
+          occupancyPercent,
+        });
+      }
+    }
+
+    return res.json({ period: { from, to }, data });
+  } catch (e: any) {
+    console.error("[analytics occupancy-heatmap]", e?.message ?? e);
+    return res.status(500).json({
+      error: "Erro ao gerar occupancy heatmap",
+      period: { from, to },
+    });
+  }
+});
+
+/* ----------------------------------------------------------------------------------------------
  * 3) OCUPAÇÃO REAL POR DIA (presenças / capacidade)
  * ----------------------------------------------------------------------------------------------*/
 analyticsRouter.get("/ocupacao-por-dia", async (req, res) => {
@@ -302,6 +400,56 @@ analyticsRouter.get("/summary", async (req, res) => {
     console.error("[analytics summary]", e?.message ?? e);
     return res.status(500).json({
       error: "Erro ao gerar resumo",
+      period: { from, to },
+    });
+  }
+});
+
+/* ----------------------------------------------------------------------------------------------
+ * 5) MEMBER RANKING — top 10 by check-in count (userId, name, checkinCount)
+ * ----------------------------------------------------------------------------------------------*/
+analyticsRouter.get("/member-ranking", async (req, res) => {
+  const from =
+    (req.query.from as string) ??
+    new Date(Date.now() - 6 * 864e5).toISOString().slice(0, 10);
+  const to = (req.query.to as string) ?? new Date().toISOString().slice(0, 10);
+
+  const ISO = /^\d{4}-\d{2}-\d{2}$/;
+  if (!ISO.test(from) || !ISO.test(to)) {
+    return res.status(400).json({ error: "from/to inválidos (YYYY-MM-DD)" });
+  }
+
+  const fromDate = new Date(`${from}T00:00:00.000Z`);
+  const toDate = new Date(`${to}T23:59:59.999Z`);
+
+  try {
+    const rows = await prisma.$queryRawUnsafe<
+      { userId: string; name: string; checkinCount: bigint }[]
+    >(
+      `
+      SELECT u.id AS "userId", u.name, COUNT(a.id)::bigint AS "checkinCount"
+      FROM "Attendance" a
+      INNER JOIN "User" u ON u.id = a."userId"
+      WHERE a."attendedAt" >= $1::timestamptz AND a."attendedAt" <= $2::timestamptz
+      GROUP BY u.id, u.name
+      ORDER BY "checkinCount" DESC
+      LIMIT 10
+      `,
+      fromDate,
+      toDate,
+    );
+
+    const data = rows.map((r) => ({
+      userId: r.userId,
+      name: r.name,
+      checkinCount: Number(r.checkinCount),
+    }));
+
+    return res.json({ period: { from, to }, data });
+  } catch (e: any) {
+    console.error("[analytics member-ranking]", e?.message ?? e);
+    return res.status(500).json({
+      error: "Erro ao gerar ranking",
       period: { from, to },
     });
   }

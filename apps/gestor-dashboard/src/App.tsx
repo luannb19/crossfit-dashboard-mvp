@@ -1,5 +1,7 @@
 import { useState } from "react";
 import HeatmapSemanaHoraCard from "@/components/HeatmapSemanaHoraCard";
+import OccupancyHeatmap from "@/components/OccupancyHeatmap";
+import MemberRankingCard from "@/components/MemberRankingCard";
 import RankingAssiduidadeCard from "@/components/RankingAssiduidadeCard";
 import OcupacaoPorDiaCard from "@/components/OcupacaoPorDiaCard";
 import ManagerSummaryCard from "@/components/ManagerSummaryCard";
@@ -95,9 +97,19 @@ export default function App() {
                   <HeatmapSemanaHoraCard demo={demo} />
                 </section>
 
+                {/* Occupancy heatmap: day × hour with % */}
+                <section className="lg:col-span-3">
+                  <OccupancyHeatmap />
+                </section>
+
                 {/* Ranking: 1 coluna */}
                 <section className="lg:col-span-1">
                   <RankingAssiduidadeCard demo={demo} />
+                </section>
+
+                {/* Member ranking (top 10): 1 coluna */}
+                <section className="lg:col-span-1">
+                  <MemberRankingCard />
                 </section>
 
                 {/* Ocupação por dia: 2 colunas */}

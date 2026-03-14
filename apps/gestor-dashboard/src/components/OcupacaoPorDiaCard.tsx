@@ -14,10 +14,9 @@ import {
   Legend,
 } from "recharts";
 
-type Point = { date: string; presencas: number };
+type Point = { date: string; presencas: number; ocupacaoPercent: number };
 
-// --------- helpers de normalização ---------
-// --------- helpers de normalização ---------
+// ---------------- helpers ----------------
 function toInt(n: any): number {
   const v = Number(n);
   return Number.isFinite(v) ? v : 0;
@@ -27,67 +26,59 @@ function isObj(x: any): x is Record<string, any> {
   return x !== null && typeof x === "object";
 }
 
-// Extrai uma lista de {date, presencas} tolerando diversos formatos de payload
-function extractOcupacao(resp: any): { date: string; presencas: number }[] {
+// Extrai presença + ocupação%
+function extractOcupacao(resp: any): Point[] {
   if (!resp) return [];
 
   const top = resp;
   const nested = isObj(resp?.data) ? resp.data : {};
 
-  // 1) caminhos já no formato de tabela
-  if (
-    Array.isArray(top.data) &&
-    top.data.every((d: any) => isObj(d) && ("date" in d) && ("presencas" in d || "value" in d || "ocupacao" in d))
-  ) {
-    return top.data.map((d: any) => ({
-      date: String(d.date),
-      presencas: toInt(d.presencas ?? d.value ?? d.ocupacao),
-    }));
+  const normal = (obj: any) => ({
+    date: String(
+      obj.date ?? obj.day ?? obj.d ?? obj.x ?? ""
+    ),
+    presencas: toInt(obj.presencas ?? obj.value ?? obj.ocupacao ?? obj.y),
+    ocupacaoPercent: toInt(
+      obj.ocupacaoPercent ??
+        obj.percent ??
+        (obj.ocupacaoRatio ? obj.ocupacaoRatio * 100 : 0)
+    ),
+  });
+
+  // 1) payload já em formato de tabela
+  if (Array.isArray(top.data) && top.data.every(isObj)) {
+    return top.data.map(normal);
   }
-  if (
-    Array.isArray(nested.data) &&
-    nested.data.every((d: any) => isObj(d) && ("date" in d) && ("presencas" in d || "value" in d || "ocupacao" in d))
-  ) {
-    return nested.data.map((d: any) => ({
-      date: String(d.date),
-      presencas: toInt(d.presencas ?? d.value ?? d.ocupacao),
-    }));
-  }
-  if (Array.isArray(top.items) && top.items.every(isObj)) {
-    return top.items.map((i: any) => ({
-      date: String(i.date),
-      presencas: toInt(i.presencas ?? i.value ?? i.ocupacao),
-    }));
-  }
-  if (Array.isArray(nested.items) && nested.items.every(isObj)) {
-    return nested.items.map((i: any) => ({
-      date: String(i.date),
-      presencas: toInt(i.presencas ?? i.value ?? i.ocupacao),
-    }));
+  if (Array.isArray(nested.data) && nested.data.every(isObj)) {
+    return nested.data.map(normal);
   }
 
-  // 2) séries { date, value } / { date, ocupacao }
+  if (Array.isArray(top.items) && top.items.every(isObj)) {
+    return top.items.map(normal);
+  }
+  if (Array.isArray(nested.items) && nested.items.every(isObj)) {
+    return nested.items.map(normal);
+  }
+
+  // 2) series
   const series =
     (Array.isArray(top.series) && top.series) ||
     (Array.isArray(nested.series) && nested.series) ||
     [];
   if (series.length && series.every(isObj)) {
-    return series.map((s: any) => ({
-      date: String(s.date ?? s.day ?? s.d ?? s.x ?? ""),
-      presencas: toInt(s.presencas ?? s.value ?? s.ocupacao ?? s.y),
-    }));
+    return series.map(normal);
   }
 
-  // 3) points { x, y }
+  // 3) points (x, y)
   const points =
     (Array.isArray(top.points) && top.points) ||
     (Array.isArray(nested.points) && nested.points) ||
     [];
   if (points.length && points.every(isObj)) {
-    return points.map((p: any) => ({ date: String(p.x), presencas: toInt(p.y) }));
+    return points.map(normal);
   }
 
-  // 4) labels + values/data (arrays numéricos)
+  // 4) fallback labels + values
   const labels: string[] =
     (Array.isArray(top.labels) && top.labels) ||
     (Array.isArray(nested.labels) && nested.labels) ||
@@ -100,12 +91,15 @@ function extractOcupacao(resp: any): { date: string; presencas: number }[] {
     [];
 
   if (labels.length && values.length && labels.length === values.length) {
-    return labels.map((d, i) => ({ date: String(d), presencas: toInt(values[i]) }));
+    return labels.map((d, i) => ({
+      date: String(d),
+      presencas: toInt(values[i]),
+      ocupacaoPercent: 0,
+    }));
   }
 
   return [];
 }
-
 
 // -------------------------------------------
 
@@ -123,11 +117,13 @@ export default function OcupacaoPorDiaCard({ demo = false }: { demo?: boolean })
       setErr(null);
       try {
         if (demo) {
-          const mock = demoOcupacaoDia(from, to);
+          const mock = demoOcupacaoDia(from, to).map((x) => ({
+            ...x,
+            ocupacaoPercent: 0,
+          }));
           if (!abort) setData(mock);
         } else {
           const q = new URLSearchParams({ from, to }).toString();
-          // Aceita tanto payload antigo (period+data) quanto o adaptado (labels/data/series/items etc.)
           const res = await fetchJSON<any>(`/api/ocupacao/dia?${q}`);
           const normalized = extractOcupacao(res);
           if (!abort) setData(Array.isArray(normalized) ? normalized : []);
@@ -149,6 +145,11 @@ export default function OcupacaoPorDiaCard({ demo = false }: { demo?: boolean })
 
   const maxY = useMemo(
     () => Math.max(10, ...data.map((d) => d.presencas || 0)),
+    [data]
+  );
+
+  const maxPercent = useMemo(
+    () => Math.max(100, ...data.map((d) => d.ocupacaoPercent || 0)),
     [data]
   );
 
@@ -174,22 +175,53 @@ export default function OcupacaoPorDiaCard({ demo = false }: { demo?: boolean })
           <LineChart data={data}>
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="date" tick={{ fontSize: 11 }} minTickGap={20} />
+            
+            {/* Eixo da esquerda = presenças */}
             <YAxis
+              yAxisId="left"
               domain={[0, Math.ceil(maxY * 1.1)]}
               allowDecimals={false}
               tick={{ fontSize: 11 }}
             />
+
+            {/* Eixo da direita = porcentagem */}
+            <YAxis
+              yAxisId="right"
+              orientation="right"
+              domain={[0, Math.ceil(maxPercent)]}
+              tickFormatter={(v) => `${v}%`}
+              tick={{ fontSize: 11 }}
+            />
+
             <Tooltip
-              formatter={(v: any) => [`${v} presenças`, "Ocupação"]}
+              formatter={(v: any, name: any) =>
+                name === "Ocupação (%)"
+                  ? [`${v}%`, name]
+                  : [`${v} presenças`, name]
+              }
               labelFormatter={(l: any) => `Dia ${l}`}
             />
             <Legend />
+
+            {/* Linha de presenças */}
             <Line
+              yAxisId="left"
               type="monotone"
               dataKey="presencas"
-              name="Ocupação"
+              name="Presenças"
               dot={false}
               strokeWidth={2}
+            />
+
+            {/* Linha de porcentagem */}
+            <Line
+              yAxisId="right"
+              type="monotone"
+              dataKey="ocupacaoPercent"
+              name="Ocupação (%)"
+              dot={false}
+              strokeWidth={2}
+              strokeDasharray="5 5"
             />
           </LineChart>
         </ResponsiveContainer>
@@ -202,12 +234,13 @@ export default function OcupacaoPorDiaCard({ demo = false }: { demo?: boolean })
             <tr className="text-left text-gray-600">
               <th className="py-1 pr-2">Data</th>
               <th className="py-1">Presenças</th>
+              <th className="py-1">Ocupação (%)</th>
             </tr>
           </thead>
           <tbody className="divide-y">
             {data.length === 0 && !loading && !err && (
               <tr>
-                <td colSpan={2} className="py-2 text-gray-500">
+                <td colSpan={3} className="py-2 text-gray-500">
                   Sem dados no período.
                 </td>
               </tr>
@@ -216,6 +249,7 @@ export default function OcupacaoPorDiaCard({ demo = false }: { demo?: boolean })
               <tr key={d.date}>
                 <td className="py-1 pr-2">{d.date}</td>
                 <td className="py-1">{d.presencas}</td>
+                <td className="py-1">{d.ocupacaoPercent}%</td>
               </tr>
             ))}
           </tbody>
