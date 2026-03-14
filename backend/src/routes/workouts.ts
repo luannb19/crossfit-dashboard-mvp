@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
+import { WorkoutCategory } from "@prisma/client";
 
 export const workoutsRouter = Router();
 
@@ -103,7 +104,7 @@ workoutsRouter.put("/:id", async (req, res) => {
         date: new Date(date),
         title: String(title),
         description: description != null ? String(description) : undefined,
-        category: String(category),
+        category: category as WorkoutCategory,
         videoUrl: videoUrl != null ? String(videoUrl) : undefined,
       },
     });

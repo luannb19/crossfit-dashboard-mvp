@@ -118,7 +118,6 @@ app.get("/api/ocupacao/dia", async (req, res) => {
 
     return res.json({
       labels,
-      data: values,
       series,
       items,
       points,
