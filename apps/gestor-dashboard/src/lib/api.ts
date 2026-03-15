@@ -229,6 +229,46 @@ export async function fetchMemberRanking(params: {
   );
 }
 
+// ===== Churn risk (at-risk: baseline drop + no-show days) =====
+export type ChurnRiskItem = {
+  userId: string;
+  name: string;
+  previousCount: number;
+  currentCount: number;
+  dropPercent: number;
+  baselineCheckInsPerWeek: number | null;
+  currentCheckInsPerWeek: number;
+  daysSinceLastCheckIn: number | null;
+};
+
+export type ChurnRiskResponse = {
+  period: {
+    current: { from: string; to: string };
+    days: number;
+    noShowDays?: number;
+  };
+  criteria?: {
+    baselineDropThreshold: number;
+    baselinePeriodWeeks: number;
+  };
+  data: ChurnRiskItem[];
+};
+
+export async function fetchChurnRisk(params?: {
+  days?: number;
+  limit?: number;
+  noShowDays?: number;
+}) {
+  const q = new URLSearchParams();
+  if (params?.days != null) q.set("days", String(params.days));
+  if (params?.limit != null) q.set("limit", String(params.limit));
+  if (params?.noShowDays != null) q.set("noShowDays", String(params.noShowDays));
+  const query = q.toString();
+  return fetchJSON<ChurnRiskResponse>(
+    `/api/analytics/churn-risk${query ? `?${query}` : ""}`
+  );
+}
+
 // ===== Util: período padrão (últimos N dias) =====
 export function getDefaultRange(days = 28): { from: string; to: string } {
   const to = new Date();

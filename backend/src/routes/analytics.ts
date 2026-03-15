@@ -455,5 +455,287 @@ analyticsRouter.get("/member-ranking", async (req, res) => {
   }
 });
 
+/* ----------------------------------------------------------------------------------------------
+ * Churn risk (Option B): types and constants
+ * ----------------------------------------------------------------------------------------------*/
+const BASELINE_PERIOD_WEEKS = 12;
+const BASELINE_STALE_DAYS = 7;
+const CHURN_BASELINE_DROP_THRESHOLD = 0.7; // currentRate < baseline * this => at-risk
+const CHURN_NO_SHOW_DAYS = 10;
+
+export type ChurnRiskItemResponse = {
+  userId: string;
+  name: string;
+  previousCount: number;
+  currentCount: number;
+  dropPercent: number;
+  baselineCheckInsPerWeek: number | null;
+  currentCheckInsPerWeek: number;
+  daysSinceLastCheckIn: number | null;
+};
+
+export type ChurnRiskApiResponse = {
+  period: {
+    current: { from: string; to: string };
+    days: number;
+    noShowDays: number;
+  };
+  criteria: {
+    baselineDropThreshold: number;
+    baselinePeriodWeeks: number;
+  };
+  data: ChurnRiskItemResponse[];
+};
+
+/* ----------------------------------------------------------------------------------------------
+ * Baseline: compute and store avg check-ins per week over last periodWeeks (for churn learning).
+ * ----------------------------------------------------------------------------------------------*/
+async function ensureBaselinesForUsers(
+  userIds: string[],
+  periodWeeks: number = BASELINE_PERIOD_WEEKS,
+): Promise<void> {
+  if (userIds.length === 0) return;
+  const since = new Date();
+  since.setDate(since.getDate() - periodWeeks * 7);
+
+  const counts = await prisma.attendance.groupBy({
+    by: ["userId"],
+    _count: { id: true },
+    where: { userId: { in: userIds }, attendedAt: { gte: since } },
+  });
+
+  for (const row of counts) {
+    const avgCheckInsPerWeek = row._count.id / periodWeeks;
+    await prisma.userChurnBaseline.upsert({
+      where: { userId: row.userId },
+      create: {
+        userId: row.userId,
+        avgCheckInsPerWeek,
+        periodWeeks,
+      },
+      update: { avgCheckInsPerWeek, periodWeeks, computedAt: new Date() },
+    });
+  }
+}
+
+/* ----------------------------------------------------------------------------------------------
+ * 6) CHURN RISK (at-risk members) — Option B: stored baseline + behavior drop + no-show days
+ *    At-risk if: (current rate < baseline * 0.7) OR (no check-in in last 10 days).
+ *    Baseline: avg check-ins per week over last 12 weeks, stored in UserChurnBaseline (computed on demand if missing/stale).
+ *    Query: ?days=30 (current window), ?noShowDays=10, ?limit=50.
+ * ----------------------------------------------------------------------------------------------*/
+analyticsRouter.get("/churn-risk", async (req, res) => {
+  const days = Math.min(
+    Math.max(parseInt((req.query.days as string) || "30", 10) || 30, 7),
+    90,
+  );
+  const noShowDays = Math.min(
+    Math.max(parseInt((req.query.noShowDays as string) || "10", 10) || 10, 1),
+    60,
+  );
+  const limit = Math.min(
+    parseInt((req.query.limit as string) || "50", 10) || 50,
+    100,
+  );
+
+  const now = new Date();
+  const currentStart = new Date(now);
+  currentStart.setDate(currentStart.getDate() - days);
+  const baselineSince = new Date(now);
+  baselineSince.setDate(baselineSince.getDate() - BASELINE_PERIOD_WEEKS * 7);
+
+  try {
+    // Candidates: users with any attendance in last 60 days (so we can have baseline/current/lastAt)
+    const candidateSince = new Date(now);
+    candidateSince.setDate(candidateSince.getDate() - 60);
+    const candidateCounts = await prisma.attendance.groupBy({
+      by: ["userId"],
+      where: { attendedAt: { gte: candidateSince } },
+    });
+    const candidateIds = candidateCounts.map((r) => r.userId);
+    if (candidateIds.length === 0) {
+      const fmt = (d: Date) => d.toISOString().slice(0, 10);
+      return res.json({
+        period: {
+          current: { from: fmt(currentStart), to: fmt(now) },
+          days,
+          noShowDays,
+        },
+        criteria: {
+          baselineDropThreshold: CHURN_BASELINE_DROP_THRESHOLD,
+          baselinePeriodWeeks: BASELINE_PERIOD_WEEKS,
+        },
+        data: [],
+      });
+    }
+
+    // Fetch existing baselines; mark who needs (re)compute (missing or stale)
+    const baselines = await prisma.userChurnBaseline.findMany({
+      where: { userId: { in: candidateIds } },
+    });
+    const baselineByUser = new Map(baselines.map((b) => [b.userId, b]));
+    const staleCutoff = new Date();
+    staleCutoff.setDate(staleCutoff.getDate() - BASELINE_STALE_DAYS);
+    const needCompute = candidateIds.filter(
+      (id) =>
+        !baselineByUser.get(id) ||
+        baselineByUser.get(id)!.computedAt < staleCutoff,
+    );
+    await ensureBaselinesForUsers(needCompute, BASELINE_PERIOD_WEEKS);
+    if (needCompute.length > 0) {
+      const refreshed = await prisma.userChurnBaseline.findMany({
+        where: { userId: { in: needCompute } },
+      });
+      refreshed.forEach((b) => baselineByUser.set(b.userId, b));
+    }
+
+    // Current period counts (last N days) and last attendedAt per user
+    const [currentCounts, lastAttendedRows] = await Promise.all([
+      prisma.attendance.groupBy({
+        by: ["userId"],
+        _count: { id: true },
+        where: { attendedAt: { gte: currentStart, lte: now } },
+      }),
+      prisma.$queryRawUnsafe<{ userId: string; lastAt: Date }[]>(
+        `SELECT "userId", MAX("attendedAt") AS "lastAt" FROM "Attendance" GROUP BY "userId"`,
+      ),
+    ]);
+
+    const currentCountByUser = new Map(
+      currentCounts.map((r) => [r.userId, r._count.id]),
+    );
+    const lastAtByUser = new Map(
+      lastAttendedRows.map((r) => [r.userId, r.lastAt]),
+    );
+
+    const weeksInWindow = days / 7;
+    const atRisk: {
+      userId: string;
+      previousCount: number;
+      currentCount: number;
+      dropPercent: number;
+      baselineCheckInsPerWeek: number | null;
+      currentCheckInsPerWeek: number;
+      daysSinceLastCheckIn: number | null;
+    }[] = [];
+
+    for (const userId of candidateIds) {
+      const baseline = baselineByUser.get(userId);
+      const currentCount = currentCountByUser.get(userId) ?? 0;
+      const currentRate = currentCount / weeksInWindow;
+      const lastAt = lastAtByUser.get(userId);
+      const daysSince =
+        lastAt != null
+          ? Math.floor((now.getTime() - new Date(lastAt).getTime()) / 86400000)
+          : null;
+
+      const belowBaseline =
+        baseline != null &&
+        baseline.avgCheckInsPerWeek >= 0.5 &&
+        currentRate <
+          baseline.avgCheckInsPerWeek * CHURN_BASELINE_DROP_THRESHOLD;
+      const noShow = daysSince != null && daysSince > noShowDays;
+
+      if (belowBaseline || noShow) {
+        const prevCount = baseline
+          ? Math.round(baseline.avgCheckInsPerWeek * weeksInWindow)
+          : 0;
+        const dropPercent =
+          prevCount > 0
+            ? Math.round(((prevCount - currentCount) / prevCount) * 100)
+            : currentCount === 0
+              ? 100
+              : 0;
+        atRisk.push({
+          userId,
+          previousCount: prevCount,
+          currentCount,
+          dropPercent,
+          baselineCheckInsPerWeek: baseline?.avgCheckInsPerWeek ?? null,
+          currentCheckInsPerWeek: Math.round(currentRate * 100) / 100,
+          daysSinceLastCheckIn: daysSince,
+        });
+      }
+    }
+
+    // Sort: longest no-show first, then by current rate ascending
+    atRisk.sort((a, b) => {
+      const aNo = a.daysSinceLastCheckIn ?? 0;
+      const bNo = b.daysSinceLastCheckIn ?? 0;
+      if (bNo !== aNo) return bNo - aNo;
+      return a.currentCheckInsPerWeek - b.currentCheckInsPerWeek;
+    });
+
+    const sliced = atRisk.slice(0, limit);
+    const users =
+      sliced.length > 0
+        ? await prisma.user.findMany({
+            where: { id: { in: sliced.map((r) => r.userId) } },
+            select: { id: true, name: true },
+          })
+        : [];
+    const nameById = new Map(users.map((u) => [u.id, u.name]));
+
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    const data = sliced.map((r) => ({
+      userId: r.userId,
+      name: nameById.get(r.userId) ?? "—",
+      previousCount: r.previousCount,
+      currentCount: r.currentCount,
+      dropPercent: r.dropPercent,
+      baselineCheckInsPerWeek: r.baselineCheckInsPerWeek,
+      currentCheckInsPerWeek: r.currentCheckInsPerWeek,
+      daysSinceLastCheckIn: r.daysSinceLastCheckIn,
+    }));
+
+    return res.json({
+      period: {
+        current: { from: fmt(currentStart), to: fmt(now) },
+        days,
+        noShowDays,
+      },
+      criteria: {
+        baselineDropThreshold: CHURN_BASELINE_DROP_THRESHOLD,
+        baselinePeriodWeeks: BASELINE_PERIOD_WEEKS,
+      },
+      data,
+    });
+  } catch (e: any) {
+    console.error("[analytics churn-risk]", e?.message ?? e);
+    return res.status(500).json({
+      error: "Erro ao gerar churn risk",
+      period: { days },
+    });
+  }
+});
+
+/* ----------------------------------------------------------------------------------------------
+ * Recompute baselines (e.g. for cron) — POST or GET with ?periodWeeks=12
+ * ----------------------------------------------------------------------------------------------*/
+analyticsRouter.get("/baselines/recompute", async (req, res) => {
+  const periodWeeks = Math.min(
+    Math.max(parseInt((req.query.periodWeeks as string) || "12", 10) || 12, 4),
+    52,
+  );
+  const since = new Date();
+  since.setDate(since.getDate() - periodWeeks * 7);
+  try {
+    const userIds = await prisma.attendance
+      .groupBy({ by: ["userId"], where: { attendedAt: { gte: since } } })
+      .then((rows) => rows.map((r) => r.userId));
+    await ensureBaselinesForUsers(userIds, periodWeeks);
+    const count = await prisma.userChurnBaseline.count();
+    return res.json({
+      ok: true,
+      periodWeeks,
+      updatedUsers: userIds.length,
+      totalBaselines: count,
+    });
+  } catch (e: any) {
+    console.error("[analytics baselines/recompute]", e?.message ?? e);
+    return res.status(500).json({ error: "Erro ao recomputar baselines" });
+  }
+});
+
 export default analyticsRouter;
 export { analyticsRouter };

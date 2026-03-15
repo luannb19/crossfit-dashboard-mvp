@@ -20,7 +20,18 @@ model User {
   role      Role     @default(ALUNO)
   name      String
   createdAt DateTime @default(now())
-  Attendance Attendance[]
+  Attendance        Attendance[]
+  ChurnBaseline     UserChurnBaseline?
+}
+
+/// Stored baseline for churn risk: avg check-ins per week over a lookback period (e.g. 12 weeks). Updated periodically; used to detect behavior drop.
+model UserChurnBaseline {
+  id                   String   @id @default(cuid())
+  userId               String   @unique
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  avgCheckInsPerWeek   Float
+  periodWeeks          Int      // e.g. 12
+  computedAt           DateTime @default(now())
 }
 
 model Class {

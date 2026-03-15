@@ -33,6 +33,17 @@ type MemberRankItem = {
   checkinCount: number;
 };
 
+type ChurnRiskItem = {
+  userId: string;
+  name: string;
+  previousCount: number;
+  currentCount: number;
+  dropPercent: number;
+  baselineCheckInsPerWeek?: number | null;
+  currentCheckInsPerWeek?: number;
+  daysSinceLastCheckIn?: number | null;
+};
+
 function getThisWeekRange(): { from: string; to: string } {
   const to = new Date();
   const from = new Date(to);
@@ -49,6 +60,7 @@ export default function HomeScreen() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [heatmap, setHeatmap] = useState<OccupancyCell[]>([]);
   const [memberRanking, setMemberRanking] = useState<MemberRankItem[]>([]);
+  const [churnRisk, setChurnRisk] = useState<ChurnRiskItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,10 +69,11 @@ export default function HomeScreen() {
     setError(null);
     const { from, to } = getThisWeekRange();
     try {
-      const [summaryRes, heatmapRes, rankingRes] = await Promise.all([
+      const [summaryRes, heatmapRes, rankingRes, churnRes] = await Promise.all([
         fetch(`${API_URL}/api/analytics/summary?from=${from}&to=${to}`),
         fetch(`${API_URL}/api/analytics/occupancy-heatmap?from=${from}&to=${to}`),
         fetch(`${API_URL}/api/analytics/member-ranking?from=${from}&to=${to}`),
+        fetch(`${API_URL}/api/analytics/churn-risk?days=30&limit=15`),
       ]);
       const summaryRaw = await summaryRes.text();
       if (!summaryRes.ok) {
@@ -72,12 +85,15 @@ export default function HomeScreen() {
       setHeatmap(Array.isArray(heatmapJson?.data) ? heatmapJson.data : []);
       const rankingJson = await rankingRes.json().catch(() => ({}));
       setMemberRanking(Array.isArray(rankingJson?.data) ? rankingJson.data : []);
+      const churnJson = await churnRes.json().catch(() => ({}));
+      setChurnRisk(Array.isArray(churnJson?.data) ? churnJson.data : []);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
       setSummary(null);
       setHeatmap([]);
       setMemberRanking([]);
+      setChurnRisk([]);
     } finally {
       setLoading(false);
     }
@@ -220,6 +236,36 @@ export default function HomeScreen() {
         )}
       </View>
 
+      {/* Membros em risco (churn): baseline + no-show */}
+      <View style={styles.churnSection}>
+        <Text style={styles.churnTitle}>Membros em risco (churn)</Text>
+        <Text style={styles.churnSubtitle}>
+          Baseline 12 sem · queda de ritmo ou &gt;10 dias sem vir
+        </Text>
+        {churnRisk.length === 0 ? (
+          <Text style={styles.churnEmpty}>Nenhum membro em risco no período.</Text>
+        ) : (
+          churnRisk.slice(0, 10).map((item) => (
+            <View key={item.userId} style={styles.churnRow}>
+              <View style={styles.churnRowLeft}>
+                <Text style={styles.churnName} numberOfLines={1}>
+                  {item.name}
+                </Text>
+                <Text style={styles.churnMeta}>
+                  {item.baselineCheckInsPerWeek != null && item.currentCheckInsPerWeek != null
+                    ? `${item.baselineCheckInsPerWeek.toFixed(1)}/sem → ${item.currentCheckInsPerWeek.toFixed(1)}/sem`
+                    : `${item.previousCount} → ${item.currentCount}`}
+                  {item.daysSinceLastCheckIn != null && item.daysSinceLastCheckIn > 10
+                    ? ` · ${item.daysSinceLastCheckIn}d sem vir`
+                    : ""}
+                </Text>
+              </View>
+              <Text style={styles.churnDrop}>−{item.dropPercent}%</Text>
+            </View>
+          ))
+        )}
+      </View>
+
       {/* Occupancy heatmap (simplified): 7 days × 12 hours */}
       <View style={styles.heatmapSection}>
         <Text style={styles.heatmapTitle}>Ocupação por dia e hora</Text>
@@ -341,6 +387,29 @@ const styles = StyleSheet.create({
   rankingPos: { fontSize: 12, color: "#6B7280", width: 28, fontWeight: "500" },
   rankingName: { flex: 1, fontSize: 14, color: "#111", marginRight: 8 },
   rankingCount: { fontSize: 12, color: "#4F46E5", fontWeight: "600" },
+  churnSection: {
+    marginTop: 20,
+    padding: 12,
+    backgroundColor: "#FFFBEB",
+    borderRadius: 10,
+    borderLeftWidth: 4,
+    borderLeftColor: "#F59E0B",
+  },
+  churnTitle: { fontSize: 14, fontWeight: "600", color: "#92400E", marginBottom: 2 },
+  churnSubtitle: { fontSize: 11, color: "#B45309", marginBottom: 10 },
+  churnEmpty: { fontSize: 13, color: "#6B7280" },
+  churnRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 6,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#FDE68A",
+  },
+  churnRowLeft: { flex: 1, marginRight: 8 },
+  churnName: { fontSize: 14, color: "#111" },
+  churnMeta: { fontSize: 11, color: "#92400E", marginTop: 2 },
+  churnDrop: { fontSize: 12, color: "#B45309", fontWeight: "600" },
   heatmapSection: {
     marginTop: 24,
     padding: 12,

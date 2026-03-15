@@ -2,6 +2,7 @@ import { useState } from "react";
 import HeatmapSemanaHoraCard from "@/components/HeatmapSemanaHoraCard";
 import OccupancyHeatmap from "@/components/OccupancyHeatmap";
 import MemberRankingCard from "@/components/MemberRankingCard";
+import ChurnRiskCard from "@/components/ChurnRiskCard";
 import RankingAssiduidadeCard from "@/components/RankingAssiduidadeCard";
 import OcupacaoPorDiaCard from "@/components/OcupacaoPorDiaCard";
 import ManagerSummaryCard from "@/components/ManagerSummaryCard";
@@ -110,6 +111,11 @@ export default function App() {
                 {/* Member ranking (top 10): 1 coluna */}
                 <section className="lg:col-span-1">
                   <MemberRankingCard />
+                </section>
+
+                {/* Churn risk (at-risk members): 1 coluna */}
+                <section className="lg:col-span-1">
+                  <ChurnRiskCard />
                 </section>
 
                 {/* Ocupação por dia: 2 colunas */}
