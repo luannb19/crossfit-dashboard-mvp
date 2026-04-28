@@ -1,5 +1,6 @@
 import os
 import re
+import unicodedata
 from datetime import timedelta
 
 import numpy as np
@@ -65,6 +66,49 @@ def read_csv_file(uploaded_file):
     uploaded_file.seek(0)
     df = pd.read_csv(uploaded_file)
     df.columns = [str(c).strip() for c in df.columns]
+    return df
+
+
+def read_csv_flexible(source):
+    for encoding in ["utf-8", "latin1", "cp1252"]:
+        try:
+            if hasattr(source, "seek"):
+                source.seek(0)
+            df = pd.read_csv(source, sep=None, engine="python", encoding=encoding)
+            if df.shape[1] > 1:
+                df.columns = [str(c).strip() for c in df.columns]
+                return df
+        except Exception:
+            pass
+
+    if hasattr(source, "seek"):
+        source.seek(0)
+    df = pd.read_csv(source)
+    df.columns = [str(c).strip() for c in df.columns]
+    return df
+
+
+def normalize_colname(name):
+    value = str(name).strip().lower()
+    value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
+    value = re.sub(r"[^a-z0-9]+", " ", value).strip()
+    return value
+
+
+def rename_columns_by_alias(df, alias_map):
+    normalized_aliases = {}
+    for canonical, aliases in alias_map.items():
+        for alias in aliases:
+            normalized_aliases[normalize_colname(alias)] = canonical
+
+    renamed = {}
+    for col in df.columns:
+        normalized_col = normalize_colname(col)
+        if normalized_col in normalized_aliases:
+            renamed[col] = normalized_aliases[normalized_col]
+
+    if renamed:
+        df = df.rename(columns=renamed)
     return df
 
 
@@ -351,7 +395,7 @@ ignore_classes_with_checkins_lte = st.sidebar.number_input(
 
 def load_dataset(uploaded_file, default_relative_path, dataset_label):
     if uploaded_file is not None:
-        return read_csv_file(uploaded_file), "upload"
+        return read_csv_flexible(uploaded_file), "upload"
 
     default_path = os.path.join("data", default_relative_path)
     if not os.path.exists(default_path):
@@ -362,7 +406,7 @@ def load_dataset(uploaded_file, default_relative_path, dataset_label):
         st.stop()
 
     try:
-        df = pd.read_csv(default_path, sep=";")
+        df = read_csv_flexible(default_path)
     except Exception as exc:
         st.error(
             f"Falha ao carregar arquivo padrao de {dataset_label} ({default_path}): {exc}"
@@ -385,6 +429,9 @@ st.sidebar.caption(
 st.sidebar.caption(
     f"Debug - arquivo de checkins usado: {checkins_source if checkins_source == 'upload' else 'data/checkins.csv'}"
 )
+st.sidebar.caption(f"Debug - colunas aquisicao: {list(acq_raw.columns)}")
+st.sidebar.caption(f"Debug - colunas aulas: {list(classes_raw.columns)}")
+st.sidebar.caption(f"Debug - colunas checkins: {list(checkins_raw.columns)}")
 
 
 # ============================================================
@@ -392,6 +439,21 @@ st.sidebar.caption(
 # ============================================================
 
 acq = acq_raw.copy()
+
+acq_alias_map = {
+    "Nome": ["nome", "cliente", "Nome", "Cliente"],
+    "Tipo": ["tipo", "origem", "Tipo", "Origem"],
+    "Data Cadastro": ["data cadastro", "data_cadastro", "Data Cadastro"],
+    "Como Conheceu": [
+        "como conheceu",
+        "canal",
+        "origem lead",
+        "Como Conheceu",
+        "Canal",
+        "Origem Lead",
+    ],
+}
+acq = rename_columns_by_alias(acq, acq_alias_map)
 
 required_acq_cols = ["Nome", "Tipo", "Data Cadastro", "Como Conheceu"]
 missing_acq = [c for c in required_acq_cols if c not in acq.columns]
