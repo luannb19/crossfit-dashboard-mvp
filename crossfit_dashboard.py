@@ -349,30 +349,42 @@ ignore_classes_with_checkins_lte = st.sidebar.number_input(
 # LOAD
 # ============================================================
 
-if acquisition_file is not None:
-    acq_raw = read_csv_file(acquisition_file)
-else:
-    acq_raw = pd.read_csv(os.path.join("data", "aquisicao.csv"), sep=";")
+def load_dataset(uploaded_file, default_relative_path, dataset_label):
+    if uploaded_file is not None:
+        return read_csv_file(uploaded_file), "upload"
 
-if classes_file is not None:
-    classes_raw = read_csv_file(classes_file)
-else:
-    classes_raw = pd.read_csv(os.path.join("data", "aulas.csv"), sep=";")
+    default_path = os.path.join("data", default_relative_path)
+    if not os.path.exists(default_path):
+        st.error(
+            f"Arquivo padrao ausente para {dataset_label}: {default_path}. "
+            "Envie o CSV manualmente ou adicione o arquivo no repositorio."
+        )
+        st.stop()
 
-if checkins_file is not None:
-    checkins_raw = read_csv_file(checkins_file)
-else:
-    checkins_raw = pd.read_csv(os.path.join("data", "checkins.csv"), sep=";")
+    try:
+        df = pd.read_csv(default_path, sep=";")
+    except Exception as exc:
+        st.error(
+            f"Falha ao carregar arquivo padrao de {dataset_label} ({default_path}): {exc}"
+        )
+        st.stop()
 
-using_default_files = all(
-    uploaded_file is None
-    for uploaded_file in [acquisition_file, classes_file, checkins_file]
+    return df, default_path
+
+
+acq_raw, acq_source = load_dataset(acquisition_file, "aquisicao.csv", "aquisição")
+classes_raw, classes_source = load_dataset(classes_file, "aulas.csv", "aulas")
+checkins_raw, checkins_source = load_dataset(checkins_file, "checkins.csv", "check-ins")
+
+st.sidebar.caption(
+    f"Debug - arquivo de aquisição usado: {acq_source if acq_source == 'upload' else 'data/aquisicao.csv'}"
 )
-
-if using_default_files:
-    st.caption("Dados carregados dos arquivos padrao da pasta data/.")
-else:
-    st.caption("Dados carregados com pelo menos um upload manual.")
+st.sidebar.caption(
+    f"Debug - arquivo de aulas usado: {classes_source if classes_source == 'upload' else 'data/aulas.csv'}"
+)
+st.sidebar.caption(
+    f"Debug - arquivo de checkins usado: {checkins_source if checkins_source == 'upload' else 'data/checkins.csv'}"
+)
 
 
 # ============================================================
