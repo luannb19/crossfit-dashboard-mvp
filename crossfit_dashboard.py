@@ -1,3 +1,4 @@
+import os
 import re
 from datetime import timedelta
 
@@ -348,13 +349,20 @@ ignore_classes_with_checkins_lte = st.sidebar.number_input(
 # LOAD
 # ============================================================
 
-acq_raw = read_csv_file(acquisition_file)
-classes_raw = read_csv_file(classes_file)
-checkins_raw = read_csv_file(checkins_file)
+if acquisition_file is not None:
+    acq_raw = read_csv_file(acquisition_file)
+else:
+    acq_raw = pd.read_csv(os.path.join("data", "aquisicao.csv"), sep=";")
 
-if acq_raw is None or classes_raw is None or checkins_raw is None:
-    st.info("Suba os 3 CSVs na barra lateral para carregar o dashboard.")
-    st.stop()
+if classes_file is not None:
+    classes_raw = read_csv_file(classes_file)
+else:
+    classes_raw = pd.read_csv(os.path.join("data", "aulas.csv"), sep=";")
+
+if checkins_file is not None:
+    checkins_raw = read_csv_file(checkins_file)
+else:
+    checkins_raw = pd.read_csv(os.path.join("data", "checkins.csv"), sep=";")
 
 
 # ============================================================
