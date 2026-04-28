@@ -2,6 +2,17 @@
 
 Monorepo do projeto InsightFlow.
 
+## Dashboard Streamlit (CrossFit)
+
+Dashboard em Streamlit para análise de aquisição, performance, engajamento e retenção da rede CrossFit.
+
+### Rodar localmente
+
+```bash
+pip install -r requirements.txt
+streamlit run crossfit_dashboard.py
+```
+
 ## 📦 Estrutura
 
 insightflow/
