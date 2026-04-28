@@ -30,6 +30,7 @@ vite.config.local.*
 logs
 *.log
 *.csv
+!data/*.csv
 
 # Coverage
 coverage/

@@ -364,6 +364,16 @@ if checkins_file is not None:
 else:
     checkins_raw = pd.read_csv(os.path.join("data", "checkins.csv"), sep=";")
 
+using_default_files = all(
+    uploaded_file is None
+    for uploaded_file in [acquisition_file, classes_file, checkins_file]
+)
+
+if using_default_files:
+    st.caption("Dados carregados dos arquivos padrao da pasta data/.")
+else:
+    st.caption("Dados carregados com pelo menos um upload manual.")
+
 
 # ============================================================
 # PREP AQUISIÇÃO
