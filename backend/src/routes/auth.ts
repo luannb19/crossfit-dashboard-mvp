@@ -5,6 +5,7 @@ import jwt from "jsonwebtoken";
 import { z } from "zod";
 import { env } from "../env";
 import { requireAuth } from "../middleware/requireAuth";
+import { prisma } from "../lib/prisma";
 
 export const authRouter = Router();
 
@@ -24,10 +25,10 @@ type AuthedUser =
 type AuthedRequest = Request & { user?: AuthedUser };
 
 /**
- * POST /auth/login  (espelhe como /api/auth/login no server.ts)
- * Retorna um JWT válido usando credenciais de demo do .env
+ * POST /auth/login  (espelhe como /api/auth/login)
+ * MVP demo: autentica usuário no banco por email+password em texto.
  */
-authRouter.post("/login", (req, res) => {
+authRouter.post("/login", async (req, res) => {
   const parsed = loginSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({
@@ -38,19 +39,55 @@ authRouter.post("/login", (req, res) => {
 
   const { email, password } = parsed.data;
 
-  if (email !== env.DEMO_USER_EMAIL || password !== env.DEMO_USER_PASSWORD) {
-    return res.status(401).json({ error: "Invalid credentials" });
+  try {
+    if (email === env.DEMO_USER_EMAIL && password === env.DEMO_USER_PASSWORD) {
+      const token = jwt.sign(
+        { sub: env.DEMO_USER_ID, role: env.DEMO_USER_ROLE, email },
+        env.JWT_SECRET,
+        { expiresIn: "1h", issuer: "insightflow" },
+      );
+      return res.status(200).json({
+        token,
+        token_type: "Bearer",
+        expires_in: 3600,
+        user: {
+          id: env.DEMO_USER_ID,
+          name: "Demo User",
+          email,
+          role: env.DEMO_USER_ROLE,
+        },
+      });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { email },
+      select: { id: true, role: true, email: true, name: true, password: true },
+    });
+    if (!user || user.password !== password) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+
+    const token = jwt.sign(
+      { sub: user.id, role: user.role, email: user.email },
+      env.JWT_SECRET,
+      { expiresIn: "1h", issuer: "insightflow" },
+    );
+
+    return res.status(200).json({
+      token,
+      token_type: "Bearer",
+      expires_in: 3600,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      },
+    });
+  } catch (error) {
+    console.error("POST /auth/login error:", error);
+    return res.status(500).json({ error: "Erro interno" });
   }
-
-  const token = jwt.sign(
-    { sub: env.DEMO_USER_ID, role: env.DEMO_USER_ROLE, email },
-    env.JWT_SECRET,
-    { expiresIn: "1h", issuer: "insightflow" },
-  );
-
-  return res
-    .status(200)
-    .json({ token, token_type: "Bearer", expires_in: 3600 });
 });
 
 /**

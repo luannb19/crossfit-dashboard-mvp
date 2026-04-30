@@ -12,7 +12,8 @@
     "forceConsistentCasingInFileNames": true,
     "allowJs": true,
 
-    "types": ["node", "vitest/globals"]
+    "types": ["node"]
   },
-  "include": ["src/**/*", "src/types/**/*.d.ts"]
+  "include": ["src/**/*", "src/types/**/*.d.ts"],
+  "exclude": ["src/**/*.test.ts"]
 }
