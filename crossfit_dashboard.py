@@ -420,15 +420,13 @@ acq_raw, acq_source = load_dataset(acquisition_file, "aquisicao.csv", "aquisiç�
 classes_raw, classes_source = load_dataset(classes_file, "aulas.csv", "aulas")
 checkins_raw, checkins_source = load_dataset(checkins_file, "checkins.csv", "check-ins")
 
-st.sidebar.caption(
-    f"Debug - arquivo de aquisição usado: {acq_source if acq_source == 'upload' else 'data/aquisicao.csv'}"
-)
-st.sidebar.caption(
-    f"Debug - arquivo de aulas usado: {classes_source if classes_source == 'upload' else 'data/aulas.csv'}"
-)
-st.sidebar.caption(
-    f"Debug - arquivo de checkins usado: {checkins_source if checkins_source == 'upload' else 'data/checkins.csv'}"
-)
+acq_label = "upload" if acq_source == "upload" else "data/aquisicao.csv"
+classes_label = "upload" if classes_source == "upload" else "data/aulas.csv"
+checkins_label = "upload" if checkins_source == "upload" else "data/checkins.csv"
+
+st.sidebar.caption(f"Debug - aquisição: {acq_label} ({len(acq_raw)} linhas)")
+st.sidebar.caption(f"Debug - aulas: {classes_label} ({len(classes_raw)} linhas)")
+st.sidebar.caption(f"Debug - checkins: {checkins_label} ({len(checkins_raw)} linhas)")
 st.sidebar.caption(f"Debug - colunas aquisicao: {list(acq_raw.columns)}")
 st.sidebar.caption(f"Debug - colunas aulas: {list(classes_raw.columns)}")
 st.sidebar.caption(f"Debug - colunas checkins: {list(checkins_raw.columns)}")
@@ -591,6 +589,18 @@ max_date = max(
 )
 
 st.sidebar.header("3. Filtro de período")
+
+# Quando os CSVs mudam (upload ou padrão), reseta o período salvo na sessão.
+# Sem isso, o date_input mantém o range antigo e os números parecem "não atualizar".
+data_fingerprint = (
+    f"{acq_label}|{len(acq_raw)}|"
+    f"{classes_label}|{len(classes_raw)}|"
+    f"{checkins_label}|{len(checkins_raw)}|"
+    f"{min_date.date()}|{max_date.date()}"
+)
+if st.session_state.get("data_fingerprint") != data_fingerprint:
+    st.session_state["data_fingerprint"] = data_fingerprint
+    st.session_state["input_periodo_analisado"] = (min_date.date(), max_date.date())
 
 selected_range = st.sidebar.date_input(
     "Período analisado",
