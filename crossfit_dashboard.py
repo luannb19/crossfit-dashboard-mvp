@@ -252,6 +252,38 @@ def make_gauge(title, value, subtitle=""):
     return fig
 
 
+def style_period_line(fig, periods, kind="month"):
+    """Evita eixo em microssegundos quando há poucos pontos (ex.: 1 mês)."""
+    periods = pd.to_datetime(pd.Series(periods), errors="coerce").dropna().sort_values()
+    if periods.empty:
+        return fig
+
+    if kind == "month":
+        pad = pd.DateOffset(months=1)
+        tickformat = "%b %Y"
+        dtick = "M1"
+    else:
+        pad = pd.Timedelta(days=7)
+        tickformat = "%d/%m/%Y"
+        dtick = None
+
+    xaxis = {
+        "type": "date",
+        "tickformat": tickformat,
+        "ticklabelmode": "period",
+        "range": [
+            (periods.min() - pad).to_pydatetime(),
+            (periods.max() + pad).to_pydatetime(),
+        ],
+    }
+    if dtick is not None:
+        xaxis["dtick"] = dtick
+
+    fig.update_xaxes(**xaxis)
+    fig.update_traces(mode="lines+markers")
+    return fig
+
+
 def retention_monthly_28d(df, retention_window_days, origin="Geral"):
     rows = []
     periods = sorted(df["Mês"].dropna().unique())
@@ -978,6 +1010,7 @@ with tab_eng:
         title="Média de check-ins por aluno — evolução semanal",
     )
     fig.update_layout(xaxis_title="Semana", yaxis_title="Check-ins por aluno")
+    style_period_line(fig, weekly_total["Semana"], kind="week")
     st.plotly_chart(fig, use_container_width=True)
 
     st.divider()
@@ -1025,6 +1058,12 @@ with tab_eng:
         delta=format_delta_pct(pct_delta(cm_checkins, pm_checkins)),
     )
 
+    if len(monthly_total) < 2:
+        st.caption(
+            "O CSV de check-ins carregado tem poucos meses; "
+            "por isso a evolução mensal aparece com poucos pontos."
+        )
+
     fig = px.line(
         monthly_total,
         x="Mês",
@@ -1033,6 +1072,7 @@ with tab_eng:
         title="Média de check-ins por aluno — evolução mensal",
     )
     fig.update_layout(xaxis_title="Mês", yaxis_title="Check-ins por aluno")
+    style_period_line(fig, monthly_total["Mês"], kind="month")
     st.plotly_chart(fig, use_container_width=True)
 
     st.divider()
@@ -1200,6 +1240,7 @@ with tab_eng:
                 xaxis_title="Mês",
                 yaxis_title="Mediana de check-ins/aluno",
             )
+            style_period_line(fig, median_evolution["Mês"], kind="month")
             st.plotly_chart(fig, use_container_width=True)
 
 
@@ -1282,6 +1323,7 @@ with tab_ret:
         xaxis_title="Semana",
         yaxis_title="Retenção",
     )
+    style_period_line(fig, weekly_ret["periodo"], kind="week")
     st.plotly_chart(fig, use_container_width=True)
 
     fig = px.line(
@@ -1296,6 +1338,7 @@ with tab_ret:
         xaxis_title="Mês",
         yaxis_title="Retenção",
     )
+    style_period_line(fig, monthly_ret["periodo"], kind="month")
     st.plotly_chart(fig, use_container_width=True)
 
     st.subheader("Retenção por origem — mês atual")
